@@ -80,6 +80,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.lock', '**/Cargo.toml') }}
+      - name: Install wasm-bindgen CLI (same version as core-wasm/Cargo.toml)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - name: Build wasm and bindings
+        run: scripts/build-wasm.sh
       - run: npm ci
       - run: npm test
       - run: npm run build

@@ -607,8 +607,12 @@ impl Periphs {
         use crate::bus::Fidelity::*;
         let mut v = vec![
             ("RCC", rcc::FIDELITY.0, rcc::FIDELITY.1),
-            ("GPIO", Partial, "pin levels from ODR/pulls; board inputs from M3"),
-            ("EXTI", Partial, "pending/mask/software trigger; GPIO edges from M3"),
+            ("GPIO", Partial, "pin levels from ODR/pulls and board inputs (buttons)"),
+            (
+                "EXTI",
+                Partial,
+                "pending/mask/software trigger, GPIO edges via SYSCFG_EXTICRx",
+            ),
             ("I2C1/I2C3", Partial, "master transfers, instant; absent devices NACK"),
             (
                 "SPI1/SPI2",
@@ -640,6 +644,22 @@ impl Periphs {
                 "IPCC",
                 Partial,
                 "CPU1 side of the mailboxes; CPU2 side driven by the FUS model (ADR-0012)",
+            ),
+            (
+                "Display (ST7567 on SPI2)",
+                Emulated,
+                "RAM, addressing, start line, orientation, inverse, all-on, reset; contrast not rendered",
+            ),
+            (
+                "LEDs and backlight (LP5562)",
+                Partial,
+                "registers, LED map, program engines (PWM, ramp, wait, branch); timings approximate",
+            ),
+            ("Buttons", Emulated, "six keys with the board's polarity and pulls"),
+            (
+                "Battery (BQ27220, BQ25896)",
+                Simulated,
+                "fixed virtual battery state; data memory provisioning",
             ),
             (
                 "CPU2 (radio core)",

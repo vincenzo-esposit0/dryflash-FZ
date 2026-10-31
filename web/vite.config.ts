@@ -6,4 +6,6 @@ import preact from "@preact/preset-vite";
 export default defineConfig({
   base: "./",
   plugins: [preact()],
+  // The emulator worker is an ES module (top-level await for the wasm init).
+  worker: { format: "es" },
 });

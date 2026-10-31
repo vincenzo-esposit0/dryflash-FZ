@@ -16,8 +16,13 @@ use map::*;
 /// Fidelity of a modelled component (shown in the UI's "Hardware fidelity" table).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fidelity {
+    /// Behaves like the hardware for everything the firmware uses.
     Emulated,
+    /// Main behaviour modelled; gaps listed in the note.
     Partial,
+    /// Plausible fixed values from a virtual device (battery, sensors).
+    Simulated,
+    /// Answers without doing the work (register file only, or a reduced stand-in).
     Stubbed,
 }
 

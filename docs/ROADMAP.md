@@ -47,16 +47,17 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 - ☑ Furi crash record decoding (RTC BKP4R) and boot-loop detection
 - ☑ Boot test: reset vector → `flipper_init`, then 10 s with no fault or reset
 - → M4: FLASH controller program/erase + option bytes (only the updater writes flash in 1.5.1)
-- → M3: wasm speed back to the M0 level; IWDG
+- → M3: wasm speed back to the M0 level; IWDG (status in BRINGUP_LOG M3 CP2)
 - → backlog: detailed instruction cycle model
 
 **DoD met:** Furi kernel starts, services start, no boot loop (BRINGUP_LOG § M2).
 
 ## M3 — First visible MVP
 
-- ☐ ST7567, buttons + EXTI, LP5562 backlight/LED
-- ☐ `core-wasm` bindings + Web Worker host (slices, throttle, Turbo, transferable frames)
-- ☐ Minimal web UI: drag & drop `.dfu`, LCD canvas, keyboard + on-screen buttons, fidelity table, honest-positioning text, disclaimer
+- ☑ ST7567, buttons + EXTI, LP5562 backlight/LED
+- ☑ CPU2 as a FUS without wireless stack; virtual device with Legacy sleep (ADR-0012)
+- ☑ `core-wasm` bindings + Web Worker host (slices, 1× pacing, Turbo, transferable frames, minimum press time)
+- ☑ Minimal web UI: drag & drop `.dfu`, LCD canvas, keyboard + on-screen buttons, fidelity table, honest-positioning text, disclaimer, virtual-device setting, firmware log
 - ☐ Deploy preview (host per §14 answer)
 
 **DoD:** Desktop rendered in the browser, menus navigable with the keyboard, preview URL live.
