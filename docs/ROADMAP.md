@@ -11,7 +11,7 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 
 - ☑ `docs/BRIEF.md`, `CLAUDE.md`
 - ☑ `docs/ARCHITECTURE.md`, `docs/ROADMAP.md` (approved 2026-10-31)
-- ☑ BRIEF §14 answers → ADR-0003 (hosting, default URL still open), ADR-0004 (Preact), ADR-0005 (pinned versions), ADR-0006 (no analytics)
+- ☑ BRIEF §14 answers → ADR-0003 (Cloudflare Worker + static assets; final URL when the account exists), ADR-0004 (Preact), ADR-0005 (pinned versions), ADR-0006 (no analytics)
 - ☑ **ADR-0001 CPU engine**: custom Rust interpreter; verified against Unicorn 2.1.4 (522 079 identical steps);
   153–165 MIPS in Chrome/Safari Web Workers; Unicorn→WASM excluded (no upstream interpreter, GPL-2.0, size)
 - ☑ ADR-0002 CORS + proxy: official host OK, GitHub release assets need the proxy

@@ -51,7 +51,7 @@ Never commit or host firmware binaries; never brand the product as "Flipper …"
 /core-wasm       wasm-bindgen bindings
 /runner          Node CLI (headless), uses core-wasm
 /web             Vite app (emulator UI, embed, compat, about)
-/proxy           Cloudflare Worker (CORS allowlist proxy, only for hosts without CORS)
+/proxy           Cloudflare Worker: serves web/dist as static assets + allowlisted CORS proxy (ADR-0003)
 /action          GitHub Action
 /firmware        compat.json (pinned URLs + hashes) — NO binaries committed
 /tests           integration + E2E + golden screenshots
