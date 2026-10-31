@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dryflash CPU spike</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #050505; color: #ddd; font: 14px ui-monospace, Menlo, monospace; margin: 24px 16px; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>dryflash — ADR-0001 CPU engine spike</h1>
+<p>Runs the Thumb-2 benchmark firmware on the WebAssembly interpreter on the main thread and in a Web Worker.</p>
+<pre id="out">running…</pre>
+<script type="module">
+const out = document.getElementById("out");
+const rounds = Number(new URLSearchParams(location.search).get("rounds") ?? 200);
+const repeats = 5;
+
+// Relative URLs inside a blob worker resolve against the blob URL, hence BASE.
+async function bench() {
+  const [wasm, fw] = await Promise.all([
+    fetch(new URL("harness.wasm", globalThis.BASE ?? location.href)).then((r) => r.arrayBuffer()),
+    fetch(new URL("bench-fw.bin", globalThis.BASE ?? location.href)).then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)),
+  ]);
+  const { instance } = await WebAssembly.instantiate(wasm);
+  const x = instance.exports;
+  const ptr = x.bench_alloc(fw.length);
+  new Uint8Array(x.memory.buffer, ptr, fw.length).set(fw);
+  const mips = [];
+  let n = 0;
+  for (let i = 0; i < repeats; i++) {
+    const t0 = performance.now();
+    n = x.bench_run(ptr, fw.length, rounds);
+    const ms = performance.now() - t0;
+    if (n < 0) throw new Error("benchmark did not reach BKPT #0");
+    mips.push(+(n / ms / 1e3).toFixed(1));
+  }
+  const results = Array.from({ length: 9 }, (_, i) => (x.bench_result(i) >>> 0).toString(16).padStart(8, "0"));
+  return { instret: n, mips, best: Math.max(...mips), results };
+}
+
+const workerSrc = `var BASE = ${JSON.stringify(location.href)}; ${bench.toString()}; const rounds = ${rounds}, repeats = ${repeats};
+  onmessage = async () => postMessage(await bench().catch((e) => ({ error: String(e) })));`;
+
+async function inWorker() {
+  const url = URL.createObjectURL(new Blob([workerSrc], { type: "text/javascript" }));
+  const w = new Worker(url);
+  return new Promise((res) => {
+    w.onmessage = (e) => res(e.data);
+    w.postMessage(null);
+  });
+}
+
+const report = { userAgent: navigator.userAgent, rounds };
+try {
+  report.main = await bench();
+  report.worker = await inWorker();
+} catch (e) {
+  report.error = String(e);
+}
+out.textContent = JSON.stringify(report, null, 2);
+await fetch("result", { method: "POST", body: JSON.stringify(report) }).catch(() => {});
+</script>
+</body>
+</html>

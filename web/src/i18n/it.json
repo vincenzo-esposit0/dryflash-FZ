@@ -1,0 +1,7 @@
+{
+  "tagline": "Prova qualsiasi firmware per Flipper Zero nel browser prima di installarlo sul tuo dispositivo.",
+  "status": "Pre-alpha. Il core dell'emulatore non è ancora collegato a questa pagina (milestone M3). Niente in questa pagina emula un dispositivo.",
+  "positioning": "dryflash è uno smoke test, non una certificazione hardware. Rileva mancati avvii, crash, fault, blocchi e flussi UI rotti. Non riproduce RF reale, fisica NFC/RFID, BLE, consumi o temporizzazioni esatte. Superare il test nell'emulatore non garantisce il funzionamento sull'hardware.",
+  "disclaimer": "Non affiliato né approvato da Flipper Devices Inc. Flipper Zero è un marchio del rispettivo proprietario. Solo per scopi educativi e ricerca di sicurezza autorizzata.",
+  "source": "Codice sorgente (GPL-3.0-or-later)"
+}

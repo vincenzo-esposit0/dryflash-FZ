@@ -1,0 +1,68 @@
+{
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later. Pinned firmware packages for tests and the /compat matrix. Binaries are fetched from the original hosts and never committed (BRIEF §4, §11). Hashes and layouts verified 2026-10-31.",
+  "schema": 1,
+  "firmwares": [
+    {
+      "id": "official",
+      "name": "Official",
+      "version": "1.5.1",
+      "source": "https://github.com/flipperdevices/flipperzero-firmware/tree/1.5.1",
+      "licence": "GPL-3.0",
+      "channel": "https://update.flipperzero.one/firmware/directory.json",
+      "cors": true,
+      "update_tgz": {
+        "url": "https://update.flipperzero.one/builds/firmware/1.5.1/flipper-z-f7-update-1.5.1.tgz",
+        "sha256": "44d0045d0bfb83c359bb7910c639b869856997bdcda62f4276bde0cb0653fa52",
+        "size": 2197578
+      },
+      "elf": {
+        "url": "https://update.flipperzero.one/builds/firmware/1.5.1/flipper-z-f7-firmware-1.5.1.elf",
+        "sha256": "bded80d9a6e4ea6fcfc07ec8f386d7694dc808bb9968a32f7c0d32c984c3798d",
+        "size": 9508276
+      },
+      "layout": { "dfu_base": "0x08000000", "dfu_len": 771284, "radio_address": "0x080D7000", "resources": "resources.ths" }
+    },
+    {
+      "id": "momentum",
+      "name": "Momentum",
+      "version": "mntm-012",
+      "source": "https://github.com/Next-Flip/Momentum-Firmware/tree/mntm-012",
+      "licence": "GPL-3.0",
+      "cors": false,
+      "update_tgz": {
+        "url": "https://github.com/Next-Flip/Momentum-Firmware/releases/download/mntm-012/flipper-z-f7-update-mntm-012.tgz",
+        "sha256": "1d9e1e600c8680172ff6f6913ca0b12484e7d45adbc72a66552e534784c8c1a7",
+        "size": 11956816
+      },
+      "layout": { "dfu_base": "0x08000000", "dfu_len": 876900, "radio_address": "0x080D7000", "resources": "resources.tar.gz" }
+    },
+    {
+      "id": "unleashed",
+      "name": "Unleashed",
+      "version": "unlshd-094",
+      "source": "https://github.com/DarkFlippers/unleashed-firmware/tree/unlshd-094",
+      "licence": "GPL-3.0",
+      "cors": false,
+      "update_tgz": {
+        "url": "https://github.com/DarkFlippers/unleashed-firmware/releases/download/unlshd-094/flipper-z-f7-update-unlshd-094.tgz",
+        "sha256": "fb572b9b6196644a542fc21743edc847d3274fff798a1bd48abfee30bbae9e11",
+        "size": 4764808
+      },
+      "layout": { "dfu_base": "0x08000000", "dfu_len": 873200, "radio_address": "0x080D7000", "resources": "resources.ths" }
+    },
+    {
+      "id": "roguemaster",
+      "name": "RogueMaster",
+      "version": "RM1024-1347-392a65c3",
+      "source": "https://github.com/RogueMaster/flipperzero-firmware-wPlugins/tree/RM1024-1347-392a65c3",
+      "licence": "GPL-3.0",
+      "cors": false,
+      "update_tgz": {
+        "url": "https://github.com/RogueMaster/flipperzero-firmware-wPlugins/releases/download/RM1024-1347-392a65c3/RM1024-1347-392a65c3.tgz",
+        "sha256": "7de72df2abc0982544c40868fa92f348efd4ae8f7ea50f25825eb81211a02a02",
+        "size": 25881611
+      },
+      "layout": { "dfu_base": "0x08000000", "dfu_len": 828084, "radio_address": "0x080D7000", "resources": "resources.tar.gz" }
+    }
+  ]
+}

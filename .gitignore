@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+.DS_Store
+/target/
+/tests/cpu-bench/fw/target/
+/tests/cpu-bench/bench-fw.bin
+node_modules/
+/web/dist/
+# Firmware binaries are never committed (BRIEF §4, §11).
+*.dfu
+*.tgz
+*.elf
+/firmware/cache/

@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+:root {
+  --bg: #050505;
+  --fg: #e6e6e6;
+  --muted: #8a8a8a;
+  --accent: #ff8a1f;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 48px 16px; }
+h1 { font-family: var(--mono); color: var(--accent); letter-spacing: 0.02em; }
+.tagline { font-size: 1.15rem; }
+.status { font-family: var(--mono); font-size: 0.9rem; border-left: 3px solid var(--accent); padding-left: 12px; }
+footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

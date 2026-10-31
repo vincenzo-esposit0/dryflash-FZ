@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "dryflash-cpu-bench-fw"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Bare-metal Thumb-2 micro-benchmark used by the ADR-0001 CPU engine spike"
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+debug = true
+panic = "abort"
+lto = true
+codegen-units = 1

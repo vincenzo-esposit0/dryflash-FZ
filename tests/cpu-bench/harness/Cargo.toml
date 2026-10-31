@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "dryflash-cpu-bench"
+description = "ADR-0001 CPU engine spike: runs the Thumb-2 micro-benchmark natively and in WebAssembly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "cpu-bench"
+path = "src/main.rs"
+
+[dependencies]
+dryflash-core = { path = "../../../core" }
