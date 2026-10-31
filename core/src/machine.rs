@@ -4,7 +4,7 @@
 
 use crate::bus::SystemBus;
 use crate::bus::map::{FLASH_BASE, FLASH_SIZE};
-use crate::cpu::{Cpu, CpuEvent, DecodeCache, Stop};
+use crate::cpu::{Bus, Cpu, CpuEvent, DecodeCache, Stop};
 use crate::loader::dfu::{Dfu, Element};
 use crate::periph::ResetKind;
 use crate::trace::digest::Digest;
@@ -72,6 +72,14 @@ impl Default for Machine {
     }
 }
 
+fn earliest(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (x, None) => x,
+        (None, y) => y,
+    }
+}
+
 impl Machine {
     pub fn new() -> Self {
         Machine {
@@ -123,6 +131,7 @@ impl Machine {
     /// (VTOR resets to 0; main flash is aliased there).
     pub fn power_on(&mut self) {
         self.bus.power_on_clear();
+        self.bus.now = self.cpu.cycles;
         self.bus.reset_peripherals(ResetKind::PowerOn);
         self.resets = 0;
         self.reset_cpu("power-on reset");
@@ -153,7 +162,7 @@ impl Machine {
             self.bus.now = self.cpu.cycles;
             match self.cpu.run(&mut self.bus, &mut self.cache, budget) {
                 Stop::Budget => break RunExit::Budget,
-                Stop::Sleep { pc } => match self.cpu.next_event() {
+                Stop::Sleep { pc } => match earliest(self.cpu.next_event(), self.bus.next_event()) {
                     // WFI fast-forward: jump to the next scheduled event.
                     Some(t) if t <= end => self.cpu.cycles = self.cpu.cycles.max(t),
                     Some(_) => {
@@ -164,6 +173,7 @@ impl Machine {
                 },
                 Stop::ResetRequest { pc } => {
                     self.resets += 1;
+                    self.bus.now = self.cpu.cycles;
                     self.bus.reset_peripherals(ResetKind::Software);
                     self.reset_cpu(&format!("SYSRESETREQ from pc 0x{pc:08X}"));
                 }

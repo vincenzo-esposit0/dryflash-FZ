@@ -46,6 +46,23 @@ pub trait Bus {
     fn set_access_pc(&mut self, _pc: u32) {}
     /// A PPB register that `sysctl` does not implement was accessed (digest only).
     fn ppb_unimplemented(&mut self, _addr: u32, _write: bool, _pc: u32) {}
+    /// Levels of the external interrupt lines into the NVIC (bit n = IRQ n).
+    #[inline]
+    fn irq_lines(&self) -> u64 {
+        0
+    }
+    /// True (once) if an access may have changed the interrupt lines.
+    #[inline]
+    fn take_irq_dirty(&mut self) -> bool {
+        false
+    }
+    /// Cycle of the next scheduled peripheral event, if any.
+    #[inline]
+    fn next_event(&self) -> Option<u64> {
+        None
+    }
+    /// Processes peripheral events due at or before `now`.
+    fn advance(&mut self, _now: u64) {}
 }
 
 /// Why [`Cpu::run`] returned.
@@ -336,6 +353,19 @@ impl Cpu {
         self.sys.systick.next_wrap
     }
 
+    /// NVIC sampling of level-sensitive interrupt lines: an asserted line pends its IRQ
+    /// unless that exception is already active (it re-pends after return if still high).
+    fn sample_irq_lines<B: Bus>(&mut self, bus: &B) {
+        let mut lines = bus.irq_lines();
+        while lines != 0 {
+            let n = lines.trailing_zeros() as usize;
+            lines &= lines - 1;
+            if n < crate::sysctl::NUM_IRQ && !self.sys.active[16 + n] {
+                self.sys.pending[16 + n] = true;
+            }
+        }
+    }
+
     /// Recomputes cached MPU-derived state after MPU or privilege changes.
     pub(crate) fn mpu_changed(&mut self) {
         self.mpu_bounds = self.sys.mpu.boundaries();
@@ -378,8 +408,15 @@ impl Cpu {
                     self.exc_check = true;
                 }
             }
+            if let Some(t) = bus.next_event()
+                && self.cycles >= t
+            {
+                bus.advance(self.cycles);
+                self.exc_check = true;
+            }
             if self.exc_check {
                 self.exc_check = false;
+                self.sample_irq_lines(bus);
                 if let Some(n) = self.preempting_exception() {
                     let ret = self.r[15];
                     if let Err(stop) = self.take_exception(bus, n, ret) {
@@ -390,7 +427,9 @@ impl Cpu {
             if self.cycles >= end {
                 return Stop::Budget;
             }
-            let limit = end.min(self.sys.systick.next_wrap.unwrap_or(u64::MAX));
+            let limit = end
+                .min(self.sys.systick.next_wrap.unwrap_or(u64::MAX))
+                .min(bus.next_event().unwrap_or(u64::MAX));
             while self.cycles < limit && !self.exc_check {
                 if let Some(stop) = self.step(bus, cache) {
                     return stop;
@@ -486,6 +525,7 @@ impl Cpu {
             Trap::Sleep => {
                 self.r[15] = next;
                 self.retire();
+                self.sample_irq_lines(bus);
                 if self.wakeup_pending() {
                     None
                 } else {

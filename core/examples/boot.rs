@@ -150,6 +150,19 @@ fn main() {
         }
     }
     print!("{}", m.digest().render(&|pc| sym(pc), 12));
+    let log = &m.bus.periphs.usart[0].tx;
+    if !log.is_empty() {
+        let text = String::from_utf8_lossy(log);
+        let tail: String = text
+            .chars()
+            .rev()
+            .take(4000)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        println!("== USART1 log ({} bytes, last 4000 chars):\n{tail}", log.len());
+    }
 }
 
 fn fmt_sym(s: Option<String>) -> String {

@@ -157,6 +157,11 @@ impl Rcc {
         true
     }
 
+    /// True while BDCR.BDRST is set: the backup domain (RTC, backup registers) is held in reset.
+    pub fn backup_domain_reset_requested(&self) -> bool {
+        self.regs.get(BDCR) & (1 << 16) != 0
+    }
+
     /// Clock tree (RM0434 "Clock tree"; dividers as programmed in CFGR/PLLCFGR/CR).
     pub fn clocks(&self) -> Clocks {
         let cr = self.regs.get(CR);

@@ -129,10 +129,15 @@ impl Cpu {
             self.mpu_check(addr, MpuAccess::Read)?;
         }
         bus.set_access_pc(self.cur_pc);
-        match bus.read(addr, size) {
+        let r = match bus.read(addr, size) {
             Ok(v) => Ok(v),
             Err(e) => Err(bus_fault(e.addr)),
+        };
+        // Peripheral accesses (including read-to-clear) may change the interrupt lines.
+        if bus.take_irq_dirty() {
+            self.exc_check = true;
         }
+        r
     }
 
     #[inline(always)]
@@ -144,10 +149,15 @@ impl Cpu {
             self.mpu_check(addr, MpuAccess::Write)?;
         }
         bus.set_access_pc(self.cur_pc);
-        match bus.write(addr, value, size) {
+        let r = match bus.write(addr, value, size) {
             Ok(()) => Ok(()),
             Err(e) => Err(bus_fault(e.addr)),
+        };
+        // Peripheral accesses (including read-to-clear) may change the interrupt lines.
+        if bus.take_irq_dirty() {
+            self.exc_check = true;
         }
+        r
     }
 
     #[cold]

@@ -162,3 +162,31 @@ cargo test --workspace --release -- --include-ignored
 cargo build --release -p dryflash-cpu-bench --bin cpu-exec
 python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 1
 ```
+
+---
+
+## M2 — System bring-up (in progress)
+
+### Checkpoint 1 (2026-10-31) — no more boot loop
+
+- Peripheral register files generated from ST's SVD (ADR-0010); RCC modelled (ready flags,
+  clock switch, reset flags, backup domain, clock tree: 64 MHz from HSE/PLL as Furi sets it).
+- The `furi_check` in `furi_hal_bus_enable` passes; boot reaches `furi_hal_rtc_init_early` and
+  starts drawing with u8g2. 0 resets, 0 unmapped accesses.
+
+### Checkpoint 2 (2026-10-31) — FreeRTOS scheduler running
+
+- NVIC sampling of peripheral interrupt lines; peripheral event hook in the CPU loop;
+  virtual time base in nanoseconds that follows HCLK1 changes.
+- Models: GPIO (IDR from outputs and pulls), EXTI (pending/mask/software trigger), I2C master
+  (instant transfers, absent devices NACK), SPI master with FIFOs, USART1/LPUART1 (instant TX
+  captured, TEACK/REACK), RTC (write protection, init mode, running BCD calendar, backup registers
+  kept across system resets).
+- Boot path now: … → `furi_run` → `vTaskStartScheduler` → `prvPortStartFirstTask` (PSP) →
+  `furi_hal_init` → `furi_hal_clock_init` → `furi_hal_interrupt_init` → `furi_hal_power_init`.
+- With no fuel gauge (BQ27220) and charger (BQ25896) on I2C1, `furi_hal_power_init` waits
+  2 × 4 s + 2 × 2.02 s by design (furi_hal_power.c:75–98): ~12 s virtual. Device models are needed.
+- Then `furi_hal_bt_init` crashes on `furi_check(LL_HSEM_1StepLock(…) == 0)` (furi_hal_bt.c:56):
+  HSEM is not modelled yet — next checkpoint (CPU2: HSEM, IPCC, shared SRAM2).
+- Speed: 153–160 MIPS native on the boot path (busy-wait delays dominate).
+- Nothing has been printed on USART1 yet at that point.

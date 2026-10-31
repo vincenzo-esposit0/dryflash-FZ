@@ -91,7 +91,7 @@ impl SystemBus {
 
     /// Resets the peripherals; memories are handled by `power_on_clear`.
     pub fn reset_peripherals(&mut self, kind: ResetKind) {
-        self.periphs.reset(kind);
+        self.periphs.reset(kind, self.now);
     }
 
     /// RAM contents are lost on power-on reset; a system reset keeps them (only the
@@ -205,6 +205,31 @@ impl Bus for SystemBus {
     fn ppb_unimplemented(&mut self, addr: u32, write: bool, pc: u32) {
         self.digest.unimplemented(addr, write, None, pc);
     }
+
+    #[inline]
+    fn irq_lines(&self) -> u64 {
+        self.periphs.irq_lines
+    }
+
+    #[inline]
+    fn take_irq_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.periphs.irq_dirty)
+    }
+
+    #[inline]
+    fn next_event(&self) -> Option<u64> {
+        self.periphs.next_event
+    }
+
+    fn advance(&mut self, now: u64) {
+        self.now = now;
+        let mut ctx = Ctx {
+            now,
+            digest: &mut self.digest,
+            pc: self.access_pc,
+        };
+        self.periphs.advance(&mut ctx);
+    }
 }
 
 #[cfg(test)]
@@ -238,15 +263,21 @@ mod tests {
         let mut bus = SystemBus::new();
         // RCC.CR resets to 0x61 (MSI on, 4 MHz); MSIRDY reads 1 because MSI is stable at once.
         assert_eq!(bus.read(0x5800_0000, Size::Word).unwrap(), 0x63);
-        // GPIOA.MODER (register file only): reset 0xABFFFFFF per the SVD, writes latch.
-        let moder = bus.read(0x4800_0000, Size::Word).unwrap();
-        bus.write(0x4800_0000, 0x1234_5678, Size::Word).unwrap();
-        assert_eq!(bus.read(0x4800_0000, Size::Word).unwrap(), 0x1234_5678);
+        // IWDG.RLR (register file only until the watchdog is modelled) resets to the SVD value.
+        let rlr = crate::periph::svd::IWDG
+            .regs
+            .iter()
+            .find(|r| r.name == "RLR")
+            .unwrap()
+            .reset;
+        assert_eq!(bus.read(0x4000_3008, Size::Word).unwrap(), rlr);
+        assert_ne!(rlr, 0, "a register with a non-zero reset value");
+        bus.write(0x4000_002C, 0x1234, Size::Word).unwrap();
+        assert_eq!(bus.read(0x4000_002C, Size::Word).unwrap(), 0x1234);
         assert!(
-            bus.digest.latched.contains_key(&0x4800_0000),
+            bus.digest.latched.contains_key(&0x4000_002C),
             "reported as register-file only"
         );
-        assert_ne!(moder, 0);
     }
 
     #[test]
