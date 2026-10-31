@@ -8,6 +8,7 @@ pub mod bus;
 pub mod cpu;
 pub mod loader;
 pub mod machine;
+pub mod periph;
 pub mod sysctl;
 pub mod trace;
 

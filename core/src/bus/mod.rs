@@ -8,6 +8,7 @@
 pub mod map;
 
 use crate::cpu::{Bus, BusError, Size};
+use crate::periph::{Ctx, Periphs, ResetKind};
 use crate::trace::digest::Digest;
 use map::*;
 
@@ -29,6 +30,9 @@ pub struct SystemBus {
     /// Engineering bytes: package, UID64, UID, flash size.
     pub engi: Vec<u8>,
     pub digest: Digest,
+    pub periphs: Periphs,
+    /// Current virtual time, updated by the machine before each CPU slice.
+    pub now: u64,
     access_pc: u32,
 }
 
@@ -72,6 +76,8 @@ impl SystemBus {
             otp: vec![0xFF; OTP_SIZE as usize],
             engi,
             digest: Digest::default(),
+            periphs: Periphs::new(),
+            now: 0,
             access_pc: 0,
         }
     }
@@ -81,6 +87,11 @@ impl SystemBus {
     pub fn set_uid64(&mut self, uid: u64) {
         let off = (UID64_ADDR - ENGI_BASE) as usize;
         self.engi[off..off + 8].copy_from_slice(&uid.to_le_bytes());
+    }
+
+    /// Resets the peripherals; memories are handled by `power_on_clear`.
+    pub fn reset_peripherals(&mut self, kind: ResetKind) {
+        self.periphs.reset(kind);
     }
 
     /// RAM contents are lost on power-on reset; a system reset keeps them (only the
@@ -124,6 +135,14 @@ impl Bus for SystemBus {
         if let Some(v) = self.read_mem(addr, size) {
             return Ok(v);
         }
+        let mut ctx = Ctx {
+            now: self.now,
+            digest: &mut self.digest,
+            pc: self.access_pc,
+        };
+        if let Some(v) = self.periphs.read(addr, size, &mut ctx) {
+            return Ok(v);
+        }
         if block_of(addr).is_some() || within(addr, size, SYSTEM_MEMORY_BASE, SYSTEM_MEMORY_SIZE).is_some() {
             // Peripheral without a model, or the ST system-memory ROM (not provided).
             self.digest.unimplemented(addr, false, None, self.access_pc);
@@ -145,6 +164,14 @@ impl Bus for SystemBus {
         }
         if let Some(o) = within(addr, size, SRAM2B_BASE, SRAM2B_SIZE) {
             wr(&mut self.sram2b, o, value, size);
+            return Ok(());
+        }
+        let mut ctx = Ctx {
+            now: self.now,
+            digest: &mut self.digest,
+            pc: self.access_pc,
+        };
+        if self.periphs.write(addr, value, size, &mut ctx) {
             return Ok(());
         }
         let in_flash =
@@ -196,13 +223,30 @@ mod tests {
     fn unimplemented_peripheral_reads_zero_and_is_recorded() {
         let mut bus = SystemBus::new();
         bus.set_access_pc(0x0800_1234);
-        assert_eq!(bus.read(0x5800_0000, Size::Word).unwrap(), 0);
-        bus.write(0x5800_0000, 0x100, Size::Word).unwrap();
-        let st = bus.digest.unimplemented[&0x5800_0000];
+        // TSC+0x050 is inside the TSC block but no register exists there in the SVD.
+        assert_eq!(bus.read(0x4002_4050, Size::Word).unwrap(), 0);
+        bus.write(0x4002_4050, 0x100, Size::Word).unwrap();
+        let st = bus.digest.unimplemented[&0x4002_4050];
         assert_eq!(
             (st.reads, st.writes, st.first_pc, st.last_write),
             (1, 1, 0x0800_1234, Some(0x100))
         );
+    }
+
+    #[test]
+    fn svd_registers_have_reset_values_and_latch() {
+        let mut bus = SystemBus::new();
+        // RCC.CR resets to 0x61 (MSI on, 4 MHz); MSIRDY reads 1 because MSI is stable at once.
+        assert_eq!(bus.read(0x5800_0000, Size::Word).unwrap(), 0x63);
+        // GPIOA.MODER (register file only): reset 0xABFFFFFF per the SVD, writes latch.
+        let moder = bus.read(0x4800_0000, Size::Word).unwrap();
+        bus.write(0x4800_0000, 0x1234_5678, Size::Word).unwrap();
+        assert_eq!(bus.read(0x4800_0000, Size::Word).unwrap(), 0x1234_5678);
+        assert!(
+            bus.digest.latched.contains_key(&0x4800_0000),
+            "reported as register-file only"
+        );
+        assert_ne!(moder, 0);
     }
 
     #[test]

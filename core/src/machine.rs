@@ -6,6 +6,7 @@ use crate::bus::SystemBus;
 use crate::bus::map::{FLASH_BASE, FLASH_SIZE};
 use crate::cpu::{Cpu, CpuEvent, DecodeCache, Stop};
 use crate::loader::dfu::{Dfu, Element};
+use crate::periph::ResetKind;
 use crate::trace::digest::Digest;
 use std::fmt;
 
@@ -122,6 +123,7 @@ impl Machine {
     /// (VTOR resets to 0; main flash is aliased there).
     pub fn power_on(&mut self) {
         self.bus.power_on_clear();
+        self.bus.reset_peripherals(ResetKind::PowerOn);
         self.resets = 0;
         self.reset_cpu("power-on reset");
     }
@@ -148,6 +150,7 @@ impl Machine {
             if budget == 0 {
                 break RunExit::Budget;
             }
+            self.bus.now = self.cpu.cycles;
             match self.cpu.run(&mut self.bus, &mut self.cache, budget) {
                 Stop::Budget => break RunExit::Budget,
                 Stop::Sleep { pc } => match self.cpu.next_event() {
@@ -161,6 +164,7 @@ impl Machine {
                 },
                 Stop::ResetRequest { pc } => {
                     self.resets += 1;
+                    self.bus.reset_peripherals(ResetKind::Software);
                     self.reset_cpu(&format!("SYSRESETREQ from pc 0x{pc:08X}"));
                 }
                 other => break RunExit::Stopped(other),

@@ -15,6 +15,12 @@ Flipper Zero is a trademark of its respective owner.
 - tITAZ314/flipper-emu (GPL-3.0) — Renode-based bring-up of the official firmware.
 - d4rks1d33/Flipper-Zero-Emulator (GPL-3.0) — full-system emulator with persistent flash.
 
+## Hardware descriptions
+
+- STMicroelectronics `STM32WB55_CM4.svd` v1.9, as shipped in flipperzero-firmware 1.5.1
+  (`scripts/debug/`). `core/src/periph/svd.rs` is generated from it (register offsets, reset
+  values, access masks only) by `scripts/gen-svd-tables.py`.
+
 ## Development tools (not distributed)
 
 - Unicorn Engine 2 (GPL-2.0) — reference CPU for differential testing only (ADR-0001).
