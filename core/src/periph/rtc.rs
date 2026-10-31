@@ -171,6 +171,11 @@ impl Rtc {
         self.regs.get(BKP0R + 4 * n as u32)
     }
 
+    /// Sets backup register BKPnR (virtual-device state kept by the backup battery).
+    pub fn set_backup(&mut self, n: usize, v: u32) {
+        self.regs.set(BKP0R + 4 * n as u32, v);
+    }
+
     pub fn read(&mut self, off: u32, now_ns: u128) -> Option<u32> {
         match off {
             TR | DR | SSR => {
