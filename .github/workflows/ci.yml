@@ -25,14 +25,52 @@ jobs:
             tests/cpu-bench/fw/target
           key: rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.lock', '**/Cargo.toml') }}
       - run: cargo fmt --all --check
-      - name: Build benchmark firmware (thumbv7em-none-eabihf)
-        run: tests/cpu-bench/build-fw.sh
+      - name: Build test firmwares (thumbv7em-none-eabihf)
+        run: tests/build-fw.sh
+      - name: Cache pinned firmware (fetched from the original host, hash-checked)
+        uses: actions/cache@v6
+        with:
+          path: firmware/cache/official
+          key: fw-official-${{ hashFiles('firmware/compat.json') }}
+      - name: Fetch pinned official firmware
+        run: node scripts/fetch-firmware.mjs official --elf
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
-      - run: cargo test --workspace --release
+      - name: Tests (including those that need the pinned firmware)
+        run: cargo test --workspace --release -- --include-ignored
       - name: Build wasm
         run: cargo build --release --target wasm32-unknown-unknown -p dryflash-core-wasm -p dryflash-cpu-bench --lib
       - name: Benchmark under Node (V8)
         run: node tests/cpu-bench/node-bench.mjs target/wasm32-unknown-unknown/release/dryflash_cpu_bench.wasm tests/cpu-bench/bench-fw.bin 200 3
+
+  cpu-fuzz:
+    # Differential fuzzing against Unicorn 2 (dev-only reference, never distributed).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: fuzz-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.lock', '**/Cargo.toml') }}
+      - uses: actions/cache@v6
+        with:
+          path: firmware/cache/official
+          key: fw-official-${{ hashFiles('firmware/compat.json') }}
+      - run: node scripts/fetch-firmware.mjs official --elf
+      - run: cargo build --release -p dryflash-cpu-bench --bin cpu-exec
+      - name: Python tools
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install unicorn==2.1.4 capstone==5.0.9
+      - name: Random encodings
+        run: .venv/bin/python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 ${{ github.run_number }}
+      - name: Firmware encodings
+        run: |
+          tests/cpu-fuzz/corpus-from-elf.sh firmware/cache/official/flipper-z-f7-firmware-1.5.1.elf > corpus.txt
+          .venv/bin/python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 ${{ github.run_number }} --corpus corpus.txt
 
   web:
     runs-on: ubuntu-latest

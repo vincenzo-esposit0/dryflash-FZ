@@ -1,6 +1,6 @@
 # dryflash — Roadmap
 
-Status: **approved 2026-10-31**; M0 done. Milestones follow BRIEF §12. Each milestone ends with: passing tests,
+Status: **approved 2026-10-31**; M0 and M1 done. Milestones follow BRIEF §12. Each milestone ends with: passing tests,
 updated `docs/BRINGUP_LOG.md`, a short demo instruction, a commit, and a stop-and-report.
 
 Legend: ☐ todo · ◐ in progress · ☑ done
@@ -22,29 +22,31 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 
 **Demo:** see `docs/BRINGUP_LOG.md` § M0.
 
-## M1 — CPU core + memory + DFU loader
+## M1 — CPU core + memory + DFU loader ☑ (2026-10-31)
 
-- ☐ Bus + memory map (flash, SRAM1, SRAM2a/b, OTP, OB, system memory stub, peripheral windows) with values cited from RM0434
-- ☐ Thumb-16/Thumb-32 integer ISA, IT blocks, exceptions basics (reset, HardFault), SysTick, NVIC skeleton
-- ☐ FPv4-SP instructions + CPACR/FPCCR (lazy stacking can land in M2)
-- ☐ Decode cache with invalidation
-- ☐ DfuSe loader (CRC, element placement, CPU2-region guard) tested on the pinned official `.dfu`
-- ☐ PPB model (NVIC, SCB, SysTick, DWT, MPU, FPU control) and exception entry/return incl. FP lazy stacking
-- ☐ Remaining DSP/FP encodings listed in BRINGUP_LOG M0 "known gaps"; differential fuzzing on random sequences
-- ☐ Bring-up digest v1 (unmapped + unimplemented accesses, faults)
-- ☐ Differential fuzz harness vs native Unicorn (dev-only)
+- ☑ Bus + memory map (flash + boot alias, SRAM1, SRAM2a/b, OTP, engineering bytes, peripheral blocks from the CMSIS header)
+- ☑ Full Thumb/Thumb-2 + DSP + FPv4-SP decoder: 219 464 / 219 464 instructions of firmware 1.5.1
+- ☑ Exception model (entry/return, FP frames, priorities, faults, escalation, lockup), MRS/MSR/CPS
+- ☑ PPB model: SCB, NVIC, SysTick, MPU (PMSAv7), FPU control, DWT CYCCNT, CoreDebug
+- ☑ ARM-exact FP semantics and exception flags (ADR-0008); eager FP stacking (ADR-0007)
+- ☑ DfuSe loader (suffix CRC, CPU2-region guard) + ELF symbols; `Machine` with WFI fast-forward and SYSRESETREQ
+- ☑ Bring-up digest (unimplemented registers by block/offset with first PC, unmapped accesses, events) — ADR-0009
+- ☑ Differential fuzzing vs Unicorn (random + firmware-corpus encodings) in CI; exception conformance firmware
 
-**DoD:** pinned official `.dfu` executes from the reset vector into `SystemInit`; instruction tests green; digest printed by a `cargo run --example boot` tool.
+**DoD met:** pinned official `.dfu` executes from the reset vector through `SystemInit` and `main`
+into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG § M1).
 
 ## M2 — System bring-up
 
-- ☐ RCC (ready flags, clock tree for timer rates), PWR, FLASH controller (+ option bytes), HSEM, IPCC
+- ☐ RCC first: enable/reset registers that latch (the M1 boot loop is `furi_check` in `furi_hal_bus_enable`), ready flags, clock tree for timer rates
+- ☐ PWR, FLASH controller (+ option bytes, ACR), HSEM, IPCC, SYSCFG/EXTI (digest order: PWR, RCC, GPIO, SYSCFG, EXTI, FLASH, RTC)
 - ☐ CPU2 behavioural stub (ADR: secure-enclave behaviour)
 - ☐ OTP provisioning from `furi_hal_version` layout
 - ☐ RTC + backup registers (survive soft reset), IWDG, RNG (seeded), CRC, DWT CYCCNT, MPU
 - ☐ Timers/LPTIM, EXTI, GPIO, DMA/DMAMUX, I2C, SPI cores; board devices initialise (stubs declared)
 - ☐ Virtual-time scheduler + WFI fast-forward; determinism test
-- ☐ Reset/boot-loop detection
+- ☐ Reset/boot-loop detection; decode the Furi crash record in RTC backup registers
+- ☐ Cycle model (instruction timings, exception entry/exit) and per-instruction cost back to M0 level in wasm
 
 **DoD:** Furi kernel starts, services start, no boot loop; digest shows no unexpected gaps on the boot path.
 

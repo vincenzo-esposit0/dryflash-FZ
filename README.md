@@ -6,8 +6,8 @@ Try any Flipper Zero firmware before flashing it to your real device: dryflash e
 real, unmodified release binaries (`.dfu` / update `.tgz`) on an instruction-level model of the
 STM32WB55, with no backend and no hardware.
 
-> **Status: pre-alpha (milestone M0).** The CPU interpreter exists and is verified against a
-> reference, but nothing boots yet. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-alpha (milestone M1).** The official firmware starts executing (reset → `SystemInit`
+> → `main` → early HAL init) but peripherals are not modelled yet, so it does not boot further. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it is — and what it is not
 
@@ -35,10 +35,15 @@ on hardware.
 Requirements: `rustup` (the toolchain is pinned in `rust-toolchain.toml`), Node.js ≥ 20.
 
 ```sh
-tests/cpu-bench/build-fw.sh     # build the Thumb-2 benchmark firmware
-cargo test --workspace          # core + benchmark tests
-npm install && npm test         # web tests
-npm run build                   # static web build in web/dist
+tests/build-fw.sh                              # bare-metal test firmwares (benchmark, exception model)
+node scripts/fetch-firmware.mjs official --elf # pinned official firmware, hash-checked, into firmware/cache/
+cargo test --workspace -- --include-ignored    # core tests, incl. booting the official firmware
+npm install && npm test                        # web tests
+npm run build                                  # static web build in web/dist
+```
+
+Bring-up tool: `cargo run --release -p dryflash-core --example boot -- <firmware.dfu> --elf <firmware.elf>`
+prints the boot milestones and the bring-up digest. See [docs/BRINGUP_LOG.md](docs/BRINGUP_LOG.md).
 ```
 
 ## Licence

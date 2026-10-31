@@ -10,3 +10,7 @@ node_modules/
 *.tgz
 *.elf
 /firmware/cache/
+/tests/exc-fw.bin
+/tests/exc-fw/target/
+__pycache__/
+.venv/

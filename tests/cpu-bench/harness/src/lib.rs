@@ -86,6 +86,8 @@ impl Bench {
         // `Results.rounds` is read by the firmware at start-up.
         bus.write(RESULTS_ADDR + 4, rounds, Size::Word).unwrap();
         let mut cpu = Cpu::new();
+        // The benchmark ends with BKPT #0: act as a halting debugger.
+        cpu.halt_on_bkpt = true;
         cpu.reset(&mut bus, FLASH_BASE).expect("vector table in flash");
         Bench {
             cpu,

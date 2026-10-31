@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "dryflash-exc-fw"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Self-checking bare-metal firmware for the dryflash M-profile exception model"
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+debug = true
+panic = "abort"
+lto = true
+codegen-units = 1

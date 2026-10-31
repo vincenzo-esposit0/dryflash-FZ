@@ -132,6 +132,35 @@ pub enum HintKind {
     Barrier,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QOp {
+    Qadd,
+    Qsub,
+    Qdadd,
+    Qdsub,
+}
+
+/// Parallel add/subtract prefixes (A5.3.13, A5.3.14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParPrefix {
+    S,
+    Q,
+    Sh,
+    U,
+    Uq,
+    Uh,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParOp {
+    Add16,
+    Asx,
+    Sax,
+    Sub16,
+    Add8,
+    Sub8,
+}
+
 /// FP data-processing operations with three operands (DDI 0403E A6.4.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VOp {
@@ -185,6 +214,8 @@ pub enum Op {
     Udf {
         imm: u8,
     },
+    /// Coprocessor instruction for a coprocessor other than CP10/CP11: UsageFault NOCP.
+    NoCp,
 
     DpImm {
         op: DpOp,
@@ -363,6 +394,135 @@ pub enum Op {
         rn: u8,
         sysm: u8,
         mask: u8,
+    },
+
+    // ---- DSP extension (A7.7, ARMv7E-M) ----
+    /// SSAT/USAT: saturate `(rn shifted)` to `sat` bits (signed: −2^(sat−1)..2^(sat−1)−1).
+    Sat {
+        unsigned: bool,
+        rd: u8,
+        rn: u8,
+        sat: u8,
+        sh: Shift,
+    },
+    /// SSAT16/USAT16.
+    Sat16 {
+        unsigned: bool,
+        rd: u8,
+        rn: u8,
+        sat: u8,
+    },
+    /// QADD, QSUB, QDADD, QDSUB.
+    Qarith {
+        op: QOp,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+    },
+    Sel {
+        rd: u8,
+        rn: u8,
+        rm: u8,
+    },
+    /// Parallel add/subtract: SADD16 … UHSUB8.
+    Parallel {
+        prefix: ParPrefix,
+        op: ParOp,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+    },
+    /// SMLA<x><y> / SMUL<x><y> (`ra == 15` means no accumulate).
+    SmulXY {
+        n_top: bool,
+        m_top: bool,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        ra: u8,
+    },
+    /// SMLAW<y> / SMULW<y>.
+    SmulWY {
+        m_top: bool,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        ra: u8,
+    },
+    /// SMLAD(X), SMUAD(X), SMLSD(X), SMUSD(X).
+    SmlaD {
+        sub: bool,
+        x: bool,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        ra: u8,
+    },
+    /// SMMLA(R), SMMUL(R), SMMLS(R).
+    Smmla {
+        sub: bool,
+        round: bool,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        ra: u8,
+    },
+    /// USAD8 / USADA8.
+    Usad8 {
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        ra: u8,
+    },
+    /// SMLAL<x><y>.
+    SmlalXY {
+        n_top: bool,
+        m_top: bool,
+        rdlo: u8,
+        rdhi: u8,
+        rn: u8,
+        rm: u8,
+    },
+    /// SMLALD(X), SMLSLD(X).
+    SmlalD {
+        sub: bool,
+        x: bool,
+        rdlo: u8,
+        rdhi: u8,
+        rn: u8,
+        rm: u8,
+    },
+    /// SXTB16/UXTB16 and the accumulating SXTAB16/UXTAB16 (`rn == 15`: no add).
+    Extend16 {
+        signed: bool,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        rot: u8,
+    },
+    /// PKHBT / PKHTB.
+    Pkh {
+        tb: bool,
+        rd: u8,
+        rn: u8,
+        rm: u8,
+        sh: Shift,
+    },
+
+    /// VCVT between f32 and fixed point, in place on Sd (A7.7.229).
+    VCvtFixed {
+        to_fixed: bool,
+        unsigned: bool,
+        half: bool,
+        d: u8,
+        frac_bits: u8,
+    },
+    /// VCVTB/VCVTT between f32 and half precision (A7.7.230).
+    VCvtHalf {
+        to_half: bool,
+        top: bool,
+        d: u8,
+        m: u8,
     },
 
     VDp {

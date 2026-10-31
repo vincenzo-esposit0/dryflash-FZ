@@ -36,6 +36,15 @@ Communication with the maintainer is in Italian; code, comments, commits and doc
 - Headless: Node.js CLI reusing the same WASM core.
 - Tests: `cargo test`, Vitest, Playwright.
 
+## Useful commands
+
+- `tests/build-fw.sh` — build the bare-metal test firmwares.
+- `node scripts/fetch-firmware.mjs <id> [--elf]` — pinned firmware into `firmware/cache/` (git-ignored); the official
+  firmware source tree for reference lives in `firmware/cache/src/` (sparse clone of the pinned tag).
+- `cargo test --workspace --release -- --include-ignored` — all tests, including booting the pinned firmware.
+- `cargo run --release -p dryflash-core --example boot -- <dfu> --elf <elf>` — boot milestones + bring-up digest.
+- `python tests/cpu-fuzz/fuzz.py target/release/cpu-exec <cases> <seed> [--corpus f]` — differential fuzzing vs Unicorn.
+
 ## Licence rule
 
 GPL-3.0-or-later. Do not replace `LICENSE`. Every source file starts with

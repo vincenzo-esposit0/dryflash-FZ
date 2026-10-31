@@ -71,22 +71,21 @@ browser worker and Node runner but drives the same `Machine` API.
 
 ### 3.1 Crate layout
 
-| Module | Responsibility |
-|---|---|
-| `cpu/` | ARMv7E-M interpreter: decoder, executor, flags, IT state, exceptions, FPv4-SP, exclusive monitor |
-| `cpu/decode_cache` | Pre-decoded instruction cache keyed by halfword address; per-1 KiB page generation counters invalidated on flash program/erase and RAM writes into pages that hold cached code |
-| `bus/` | Address decoder (sorted region table → fast path for flash/SRAM, trait dispatch for peripherals), access-width rules, unaligned-access policy, bus-fault generation |
-| `mem/` | Flash (1 MiB, page-erase semantics, write-protect from `SFSA`), SRAM1, SRAM2a/2b (sizes per RM0434 — verify), OTP (`0x1FFF7000`, 1 KiB — verify), option bytes, system-memory stub |
-| `sysctl/` | NVIC, SCB, SysTick, DWT (CYCCNT), MPU, FPU control (CPACR/FPCCR lazy stacking) |
-| `periph/` | STM32WB55 peripherals (RCC, PWR, FLASH, HSEM, IPCC, GPIO, EXTI, SPI, I2C, DMA/DMAMUX, TIMx, LPTIMx, RTC, IWDG, RNG, CRC, ADC, COMP, USART/LPUART, USB, AES/PKA) |
-| `cpu2/` | Behavioural CPU2 stub: IPCC channel handling + shared SRAM2 tables (§5) |
-| `board/` | f7 board devices on buses/pins: ST7567, LP5562, BQ27220, BQ25896, SD (SPI), CC1101, ST25R3916, buttons, vibro, speaker, IR, iButton, RFID |
-| `sched/` | Virtual-time timeline (min-heap of `(time, seq, event)`), deterministic tie-break by `seq` |
-| `loader/` | DfuSe, `.tgz` + `update.fuf`, heatshrink + tar, raw `.bin`, ELF symbols (`object` / `gimli` crates, symbolication only) |
-| `fs/` | FAT32 image creation and file injection for "Quick install" resources (e.g. `fatfs` crate, MIT — verify fit) |
-| `trace/` | PC ring buffer (last 64), optional full trace, bring-up digest counters |
-| `crash/` | Fault capture, `furi_crash` detection, boot-loop / hang detection, report model |
-| `snapshot/` | (later) machine state save/restore for fast reboots and tests |
+| Module | Responsibility | Status |
+|---|---|---|
+| `cpu/` | ARMv7E-M interpreter: `decode`, `exec`, `dsp`, `fp` (ARM-exact FP, ADR-0008), `exception` (B1.5), `decode_cache` | M1 |
+| `sysctl/` | Internal PPB owned by the CPU: SCB, NVIC, SysTick, `mpu` (PMSAv7), FPU control, DWT, CoreDebug (ADR-0009) | M1 |
+| `bus/` | `SystemBus`: memories, flash boot alias, `map` (blocks from the CMSIS header); unmodelled blocks read as zero and are reported | M1 (peripheral dispatch M2) |
+| `trace/digest` | Bring-up digest: unimplemented registers by block/offset, unmapped accesses, events | M1 |
+| `loader/` | `dfu` (DfuSe), `elf` (symbols only); `.tgz` + `update.fuf`, heatshrink/tar/gzip in M4 | M1 / M4 |
+| `machine` | `Machine`: CPU + bus + decode cache; run loop with WFI fast-forward and SYSRESETREQ | M1 |
+| `periph/` | STM32WB55 peripherals (RCC, PWR, FLASH, HSEM, IPCC, GPIO, EXTI, SPI, I2C, DMA, TIMx, LPTIMx, RTC, IWDG, RNG, CRC, ADC, COMP, USART, USB, AES/PKA) | M2+ |
+| `cpu2/` | Behavioural CPU2 stub: IPCC channels + shared SRAM2 tables (§5) | M2 |
+| `board/` | f7 devices: ST7567, LP5562, BQ27220, BQ25896, SD (SPI), CC1101, ST25R3916, buttons, … | M2–M7 |
+| `sched/` | Virtual-time timeline for peripheral events | M2 |
+| `fs/` | FAT32 image creation and file injection | M4 |
+| `crash/` | Fault capture, `furi_crash` decoding, boot-loop / hang detection, report model | M6 |
+| `snapshot/` | Machine state save/restore | later |
 
 Every peripheral and device implements a common trait:
 
@@ -115,8 +114,10 @@ The PPB (SCB, NVIC, SysTick, DWT, MPU, FPU control at `0xE000_E000`) is handled 
   page generation counters.
 - Thumb-16, Thumb-32, DSP (SIMD, saturating, `SMLAxy`…), FPv4-SP (single precision, VFP register
   file, FPSCR, lazy stacking), IT blocks, `LDREX/STREX` with a local monitor cleared on exception entry.
-- Exceptions: priority-based preemption, tail-chaining and late arrival as far as Furi/FreeRTOS need
-  (PendSV/SVC/SysTick ordering is what actually matters), EXC_RETURN handling for MSP/PSP and FP frames.
+- Exceptions: priority-based preemption and nesting, EXC_RETURN handling for MSP/PSP and FP frames,
+  fault escalation and lockup. Tail-chaining is done as return + re-entry (same architectural state).
+  Run stops (`Stop`): budget, sleep (WFI/WFE with nothing pending), reset request, lockup,
+  watchpoint, unimplemented encoding, BKPT when acting as a halting debugger.
 - Cycle model: deterministic approximate cycle counts per instruction class (good enough for
   DWT-based delays and timer rates; not cycle-exact).
 - Hooks: PC breakpoints (sorted set checked only when non-empty), symbol breakpoints (`furi_crash`)

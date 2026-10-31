@@ -3,14 +3,14 @@
 //!
 //! Expected values were produced by this interpreter and cross-checked instruction by
 //! instruction against Unicorn 2.1.4 with `tests/cpu-bench/unicorn_diff.py` (ADR-0001).
-//! Build the image first with `tests/cpu-bench/build-fw.sh`.
+//! Build the image first with `tests/build-fw.sh`.
 
 use dryflash_core::cpu::Stop;
 use dryflash_cpu_bench::Bench;
 
 fn image() -> Vec<u8> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../bench-fw.bin");
-    std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e} — run tests/cpu-bench/build-fw.sh first"))
+    std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e} — run tests/build-fw.sh first"))
 }
 
 #[test]

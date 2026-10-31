@@ -676,6 +676,16 @@ fn decode_dp_shifted(h1: u32, h2: u32) -> Option<Op> {
     let rd = bits(h2, 11, 8) as u8;
     let rm = bits(h2, 3, 0) as u8;
     let sh = decode_imm_shift(bits(h2, 5, 4), bits(h2, 14, 12) << 2 | bits(h2, 7, 6));
+    if bits(h1, 8, 5) == 0b0110 && !s {
+        // PKHBT (tb = 0, LSL) / PKHTB (tb = 1, ASR) (A7.7.89).
+        return Some(Op::Pkh {
+            tb: bit(h2, 5),
+            rd,
+            rn,
+            rm,
+            sh,
+        });
+    }
     let (op, _) = dp_op(bits(h1, 8, 5), rd, rn, s)?;
     let s = if s { SetFlags::Yes } else { SetFlags::No };
     Some(Op::DpReg { op, s, rd, rn, rm, sh })
@@ -752,7 +762,28 @@ fn decode_dp_plain_imm(h1: u32, h2: u32) -> Option<Op> {
             lsb,
             width: w5 + 1,
         },
-        _ => return None, // SSAT/USAT and the 16-bit variants: M1.
+        // SSAT/USAT (A7.7.158, A7.7.208): sh = h1[5] selects ASR, and ASR #0 encodes
+        // the 16-bit variants.
+        0b10000 | 0b10010 | 0b11000 | 0b11010 => {
+            let unsigned = bit(h1, 7);
+            let imm5 = bits(h2, 14, 12) << 2 | bits(h2, 7, 6);
+            let asr = bit(h1, 5);
+            let sat_imm = bits(h2, 4, 0) as u8;
+            if asr && imm5 == 0 {
+                let sat = (sat_imm & 0xF) + if unsigned { 0 } else { 1 };
+                return Some(Op::Sat16 { unsigned, rd, rn, sat });
+            }
+            let sh = decode_imm_shift(if asr { 2 } else { 0 }, imm5);
+            let sat = sat_imm + if unsigned { 0 } else { 1 };
+            Op::Sat {
+                unsigned,
+                rd,
+                rn,
+                sat,
+                sh,
+            }
+        }
+        _ => return None,
     })
 }
 
@@ -902,22 +933,60 @@ fn decode_dp_register(h1: u32, h2: u32) -> Option<Op> {
             0b0001 => ExtendKind::Uxth,
             0b0100 => ExtendKind::Sxtb,
             0b0101 => ExtendKind::Uxtb,
-            _ => return None, // SXTB16/UXTB16: M1.
+            0b0010 | 0b0011 => {
+                return Some(Op::Extend16 {
+                    signed: op1 == 0b0010,
+                    rd,
+                    rn,
+                    rm,
+                    rot,
+                });
+            }
+            _ => return None,
         };
         return Some(Op::Extend { kind, rd, rn, rm, rot });
     }
     if op1 & 0b1100 == 0b1000 && op2 & 0b1100 == 0b1000 {
+        // A5.3.15 miscellaneous operations.
         let kind = match (bits(h1, 5, 4), bits(h2, 5, 4)) {
+            (0b00, q) => {
+                let op = [QOp::Qadd, QOp::Qdadd, QOp::Qsub, QOp::Qdsub][q as usize];
+                return Some(Op::Qarith { op, rd, rn, rm });
+            }
+            (0b10, 0b00) => return Some(Op::Sel { rd, rn, rm }),
             (0b01, 0b00) => RevKind::Rev,
             (0b01, 0b01) => RevKind::Rev16,
             (0b01, 0b10) => RevKind::Rbit,
             (0b01, 0b11) => RevKind::Revsh,
             (0b11, 0b00) => RevKind::Clz,
-            _ => return None, // QADD family, SEL: M1.
+            _ => return None,
         };
         return Some(Op::Rev { kind, rd, rm });
     }
-    None // Parallel add/subtract (DSP): M1.
+    if op1 & 0b1000 != 0 && op2 & 0b1000 == 0 {
+        // A5.3.13 (signed, op2[2] = 0) and A5.3.14 (unsigned) parallel add/subtract.
+        let unsigned = op2 & 0b0100 != 0;
+        let prefix = match (unsigned, op2 & 0b11) {
+            (false, 0) => ParPrefix::S,
+            (false, 1) => ParPrefix::Q,
+            (false, 2) => ParPrefix::Sh,
+            (true, 0) => ParPrefix::U,
+            (true, 1) => ParPrefix::Uq,
+            (true, 2) => ParPrefix::Uh,
+            _ => return None,
+        };
+        let op = match op1 & 0b111 {
+            0b001 => ParOp::Add16,
+            0b010 => ParOp::Asx,
+            0b110 => ParOp::Sax,
+            0b101 => ParOp::Sub16,
+            0b000 => ParOp::Add8,
+            0b100 => ParOp::Sub8,
+            _ => return None,
+        };
+        return Some(Op::Parallel { prefix, op, rd, rn, rm });
+    }
+    None
 }
 
 /// A5.3.16 multiply, multiply accumulate, absolute difference.
@@ -947,7 +1016,58 @@ fn decode_multiply(h1: u32, h2: u32) -> Option<Op> {
             rm,
             ra,
         }),
-        _ => None, // Halfword/dual DSP multiplies: M1.
+        (0b001, _) => {
+            let (n_top, m_top) = (bit(h2, 5), bit(h2, 4));
+            Some(Op::SmulXY {
+                n_top,
+                m_top,
+                rd,
+                rn,
+                rm,
+                ra,
+            })
+        }
+        (0b010, 0 | 1) => Some(Op::SmlaD {
+            sub: false,
+            x: bit(h2, 4),
+            rd,
+            rn,
+            rm,
+            ra,
+        }),
+        (0b011, 0 | 1) => Some(Op::SmulWY {
+            m_top: bit(h2, 4),
+            rd,
+            rn,
+            rm,
+            ra,
+        }),
+        (0b100, 0 | 1) => Some(Op::SmlaD {
+            sub: true,
+            x: bit(h2, 4),
+            rd,
+            rn,
+            rm,
+            ra,
+        }),
+        (0b101, 0 | 1) => Some(Op::Smmla {
+            sub: false,
+            round: bit(h2, 4),
+            rd,
+            rn,
+            rm,
+            ra,
+        }),
+        (0b110, 0 | 1) => Some(Op::Smmla {
+            sub: true,
+            round: bit(h2, 4),
+            rd,
+            rn,
+            rm,
+            ra,
+        }),
+        (0b111, 0) => Some(Op::Usad8 { rd, rn, rm, ra }),
+        _ => None,
     }
 }
 
@@ -984,7 +1104,34 @@ fn decode_long_multiply(h1: u32, h2: u32) -> Option<Op> {
         (0b100, 0b0000) => long(LongMulKind::Smlal),
         (0b110, 0b0000) => long(LongMulKind::Umlal),
         (0b110, 0b0110) => long(LongMulKind::Umaal),
-        _ => None, // SMLALxy/SMLALD/SMLSLD: M1.
+        (0b100, op2) if op2 & 0b1100 == 0b1000 => {
+            let (n_top, m_top) = (bit(h2, 5), bit(h2, 4));
+            Some(Op::SmlalXY {
+                n_top,
+                m_top,
+                rdlo,
+                rdhi,
+                rn,
+                rm,
+            })
+        }
+        (0b100, 0b1100 | 0b1101) => Some(Op::SmlalD {
+            sub: false,
+            x: bit(h2, 4),
+            rdlo,
+            rdhi,
+            rn,
+            rm,
+        }),
+        (0b101, 0b1100 | 0b1101) => Some(Op::SmlalD {
+            sub: true,
+            x: bit(h2, 4),
+            rdlo,
+            rdhi,
+            rn,
+            rm,
+        }),
+        _ => None,
     }
 }
 
@@ -992,7 +1139,8 @@ fn decode_long_multiply(h1: u32, h2: u32) -> Option<Op> {
 fn decode_coproc(h1: u32, h2: u32) -> Option<Op> {
     let coproc = bits(h2, 11, 8);
     if coproc & 0b1110 != 0b1010 {
-        return None;
+        // Only CP10/CP11 exist on the Cortex-M4; others raise NOCP (DDI 0403E B1.5.14).
+        return Some(Op::NoCp);
     }
     let double = coproc == 0b1011;
     // Extension register load/store (A6.5).
@@ -1009,7 +1157,11 @@ fn decode_coproc(h1: u32, h2: u32) -> Option<Op> {
             let rt2 = bits(h1, 3, 0) as u8;
             let vm = bits(h2, 3, 0);
             let mbit = bits(h2, 5, 5);
-            let sm = if double { (mbit << 4 | vm) * 2 } else { vm << 1 | mbit };
+            // The M4 has D0-D15 only (S0-S31); S31 cannot start a register pair.
+            if double && mbit != 0 || !double && (vm << 1 | mbit) == 31 {
+                return None;
+            }
+            let sm = if double { vm * 2 } else { vm << 1 | mbit };
             return Some(Op::VMov2 {
                 to_core: l,
                 rt,
@@ -1020,7 +1172,10 @@ fn decode_coproc(h1: u32, h2: u32) -> Option<Op> {
         if !p && !u && !w {
             return None;
         }
-        let d = if double { (dbit << 4 | vd) * 2 } else { vd << 1 | dbit } as u8;
+        if double && dbit != 0 {
+            return None; // D16-D31 do not exist on the Cortex-M4 FPU.
+        }
+        let d = if double { vd * 2 } else { vd << 1 | dbit } as u8;
         if p && !w {
             let off = (imm8 << 2) as i32;
             return Some(Op::VLdSt {
@@ -1034,8 +1189,14 @@ fn decode_coproc(h1: u32, h2: u32) -> Option<Op> {
         if p == u {
             return None;
         }
-        // For doubles imm8 counts words too (FLDMX odd values are not used on the M4).
-        let count = (imm8 & !1 | if double { 0 } else { imm8 & 1 }) as u8;
+        // imm8 counts words for both single and double register lists.
+        if double && imm8 & 1 != 0 {
+            return None; // FLDMX/FSTMX: not part of ARMv7-M.
+        }
+        let count = imm8 as u8;
+        if count == 0 || d as u32 + count as u32 > 32 {
+            return None; // UNPREDICTABLE register lists (A7.7.236).
+        }
         return Some(Op::VLdStM {
             load: l,
             d,
@@ -1150,7 +1311,34 @@ fn decode_coproc(h1: u32, h2: u32) -> Option<Op> {
                     d: sd,
                     m: sm,
                 }),
-                _ => None, // Half-precision and fixed-point conversions: M1.
+                // VCVTB/VCVTT (A7.7.230): opc2 001x, T = h2[7].
+                (0b0010 | 0b0011, _) => {
+                    let to_half = opc2 & 1 != 0;
+                    Some(Op::VCvtHalf {
+                        to_half,
+                        top: bit(h2, 7),
+                        d: sd,
+                        m: sm,
+                    })
+                }
+                // VCVT fixed point (A7.7.229): opc2 1o1U; operates in place on Sd.
+                (0b1010 | 0b1011 | 0b1110 | 0b1111, _) => {
+                    let half = !bit(h2, 7);
+                    let size = if half { 16 } else { 32 };
+                    let imm = (bits(h2, 3, 0) << 1 | bits(h2, 5, 5)) as i32;
+                    let frac_bits = size - imm;
+                    if frac_bits < 0 {
+                        return None;
+                    }
+                    Some(Op::VCvtFixed {
+                        to_fixed: opc2 & 0b0100 != 0,
+                        unsigned: opc2 & 1 != 0,
+                        half,
+                        d: sd,
+                        frac_bits: frac_bits as u8,
+                    })
+                }
+                _ => None,
             }
         }
         _ => None,

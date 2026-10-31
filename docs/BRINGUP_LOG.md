@@ -74,3 +74,91 @@ node tests/cpu-bench/node-bench.mjs target/wasm32-unknown-unknown/release/dryfla
 # Browsers: (cd tests/cpu-bench && node serve.mjs ../../target/wasm32-unknown-unknown/release/dryflash_cpu_bench.wasm bench-fw.bin /tmp/results.jsonl)
 # then open http://127.0.0.1:8765/ in each browser; results are printed by the server.
 ```
+
+---
+
+## M1 — CPU core, memory map, DFU loader (2026-10-31)
+
+### What runs
+
+- **Official firmware 1.5.1** (`firmware.dfu`, pinned, sha256-checked) loads into a 1 MiB flash
+  model, resets through the vector table at address 0 (flash alias, `VTOR = 0` as set by
+  `SystemInit`) and runs the real boot path:
+
+  | Cycle | Reached |
+  |---|---|
+  | 0 | `Reset_Handler` (vector 0x08011651) |
+  | 3 | `SystemInit` |
+  | 39 535 | `__libc_init_array` |
+  | 39 578 | `main` → `furi_init` |
+  | 43 128 | `furi_hal_init_early` → `furi_hal_clock_init_early` |
+  | 48 014 | `__furi_crash_implementation` ("furi_check failed", called from `furi_hal_bus_enable`) |
+
+  The crash is expected: RCC is not modelled yet, so the enable/reset-state checks in
+  `furi_hal_bus_enable` (targets/f7/furi_hal/furi_hal_bus.c:177–203) cannot hold. Furi records
+  the crash in RTC backup register `RTC+0x060` (message pointer 0x080A3BCA → "furi_check failed")
+  and resets with SYSRESETREQ: **boot loop**, ~1 100 resets per virtual second. This is the
+  starting point of M2.
+- Decoder coverage: **219 464 / 219 464** instructions of the 1.5.1 ELF decode
+  (`cargo run --example decode_coverage`).
+- Exception model: entry/return with basic and extended (FP) frames, EXC_RETURN, MSP/PSP banking,
+  CONTROL, PRIMASK/BASEPRI/FAULTMASK, priorities with PRIGROUP, preemption and nesting, SVC,
+  PendSV, SysTick, WFI/WFE with fast-forward, fault escalation (UsageFault, BusFault, MemManage →
+  HardFault, lockup), CFSR/HFSR/MMFAR/BFAR, MPU (PMSAv7, used by Furi's NULL guard).
+- PPB: SCB, NVIC (63 IRQs, 4 priority bits), SysTick, MPU, FPU control, DWT CYCCNT, CoreDebug.
+
+### Correctness
+
+- Exception conformance firmware (`tests/exc-fw`, 13 self-checks against DDI 0403E): all pass.
+  A mutation check (CCR.STKALIGN forced to 0) is caught by test T11.
+- Differential fuzzing vs Unicorn 2.1.4 (`tests/cpu-fuzz/fuzz.py`): 240 000 single-instruction
+  cases with random registers, flags, FP registers and RAM; 88 608 on defined encodings, **0
+  unexplained mismatches**. Divergences are classified and counted, never hidden:
+  - dryflash follows the Cortex-M4 where Unicorn is permissive: unaligned LDM/STRD/VLDR fault,
+    NOCP for coprocessors other than CP10/CP11, double-precision/NEON/ARMv8 FP UNDEFINED;
+  - UNPREDICTABLE encodings (PC/SP misuse, should-be-zero bits) may differ: architecture allows it;
+  - harness timing: branches to unmapped memory fault at the next step in dryflash.
+- The fuzzer found and fixed in M1: an out-of-range FP register index (D16+ decoded on an FPU
+  that only has D0–D15), NaN propagation (ADR-0008), FPSub NaN handling, FLDMX forms.
+- Integration test: the 1.5.1 boot path order and 1 M further cycles without CPU emulator gaps
+  or unmapped accesses (`core/tests/boot_official.rs`).
+
+### Performance (Apple M5, best of runs)
+
+| Workload | Native | Node 23.7 (wasm) |
+|---|---|---|
+| CPU benchmark (M0 workload) | 165–199 MIPS | ~140 MIPS (M0: 158) |
+| Official 1.5.1 boot loop, full system bus + digest | 131 MIPS | not measured |
+
+The wasm loss (~11 %) is the cost of the full exception model per instruction; profiling showed
+it is all in the run loop and `exec` after moving PPB/MPU/fault paths out of line (#[cold]) and
+forcing `dp`/`exec_mem`/`cond` inline. Browsers were not re-measured in M1.
+
+### Stubbed / not emulated
+
+All STM32WB55 peripherals (RCC, PWR, FLASH controller, GPIO, EXTI, RTC, …): read-as-zero,
+write-ignored, reported in the digest (ADR-0009). OTP not provisioned (erased). System-memory
+ROM not provided. CPU2 absent.
+
+### Known gaps
+
+- FP: arithmetic always rounds to nearest (FPSCR.RMode honoured by VCVT only); lazy FP stacking
+  is done eagerly (ADR-0007: FPCCR.LSPACT/FPCAR not updated).
+- Cycle model: 1 cycle per instruction; exception entry/exit take no extra cycles (M2).
+- Debug: no halting debug, DebugMonitor, DWT comparators, ITM/TPIU.
+- Stacking errors escalate directly to HardFault (no MSTKERR/STKERR-specific handler choice).
+- WFE wakes on the event register and pending exceptions only (no SEVONPEND).
+
+### Demo
+
+```sh
+tests/build-fw.sh
+node scripts/fetch-firmware.mjs official --elf
+cargo run --release -p dryflash-core --example boot -- \
+  firmware/cache/official/f7-update-1.5.1/firmware.dfu \
+  --elf firmware/cache/official/flipper-z-f7-firmware-1.5.1.elf --cpu2-start 0x080D7000 --cycles 64000000
+cargo test --workspace --release -- --include-ignored
+# Differential fuzzing (dev tools in a venv: unicorn==2.1.4 capstone==5.0.9):
+cargo build --release -p dryflash-cpu-bench --bin cpu-exec
+python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 1
+```

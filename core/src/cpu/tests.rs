@@ -43,6 +43,7 @@ fn run(code: &[u16], setup: impl FnOnce(&mut Cpu)) -> Cpu {
         bus.write(0x100 + 2 * i as u32, *hw as u32, Size::Half).unwrap();
     }
     let mut cpu = Cpu::new();
+    cpu.halt_on_bkpt = true;
     cpu.r[13] = 0x8000;
     cpu.r[15] = 0x100;
     setup(&mut cpu);
@@ -118,40 +119,41 @@ fn fp_requires_cpacr_and_converts() {
         0xEE00, 0x0A10, 0xEEB8, 0x0AC0, 0xEE30, 0x0A00, 0xEEFD, 0x0AC0, 0xEE10, 0x1A90, BKPT,
     ];
     let c = run(&code, |c| {
-        c.fp_enabled = true;
+        c.sys.cpacr = 0xF << 20;
         c.r[0] = (-7i32) as u32;
     });
     assert_eq!(f32::from_bits(c.s[0]), -14.0);
     assert_eq!(c.r[1] as i32, -14);
 
+    // Without CPACR access the FP instruction raises UsageFault NOCP. UsageFault is not
+    // enabled in SHCSR, so it escalates to HardFault; the HardFault vector (0) has bit 0
+    // clear, so the handler's first instruction raises INVSTATE at priority -1: lockup.
     let mut bus = FlatBus(vec![0; 0x10000]);
     bus.write(0x100, 0xEE00, Size::Half).unwrap();
     bus.write(0x102, 0x0A10, Size::Half).unwrap();
     let mut cpu = Cpu::new();
+    cpu.r[13] = 0x8000;
     cpu.r[15] = 0x100;
     let stop = cpu.run(&mut bus, &mut DecodeCache::new(0, 0x10000), 10);
-    assert!(matches!(
-        stop,
-        Stop::Exception {
-            kind: super::ExceptionKind::NoCoprocessor,
-            pc: 0x100
-        }
-    ));
+    assert!(matches!(stop, Stop::Lockup { .. }), "{stop:x?}");
+    assert_ne!(cpu.sys.cfsr & crate::sysctl::CFSR_NOCP, 0);
+    assert_ne!(cpu.sys.hfsr & crate::sysctl::HFSR_FORCED, 0);
 }
 
 #[test]
 fn unimplemented_encoding_stops_instead_of_skipping() {
-    // ssat r0, #8, r1 — not implemented before M1 (A7.7.159 T1: F301 0007).
+    // F870 0000: op1 = 11, op2 = 0000111 is not an allocated encoding (A5.3, Table A5-14
+    // marks it UNDEFINED); dryflash reports it as an emulator gap instead of guessing.
     let mut bus = FlatBus(vec![0; 0x10000]);
-    bus.write(0x100, 0xF301, Size::Half).unwrap();
-    bus.write(0x102, 0x0007, Size::Half).unwrap();
+    bus.write(0x100, 0xF870, Size::Half).unwrap();
+    bus.write(0x102, 0x0000, Size::Half).unwrap();
     let mut cpu = Cpu::new();
     cpu.r[15] = 0x100;
     let stop = cpu.run(&mut bus, &mut DecodeCache::new(0, 0x10000), 10);
     assert_eq!(
         stop,
         Stop::Unimplemented {
-            raw: 0xF301_0007,
+            raw: 0xF870_0000,
             pc: 0x100
         }
     );
