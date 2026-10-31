@@ -187,6 +187,26 @@ impl Machine {
         }
     }
 
+    /// Presses or releases a button; the firmware sees it through GPIO and EXTI.
+    pub fn set_button(&mut self, b: crate::board::Button, pressed: bool) {
+        self.bus.periphs.set_button(b, pressed);
+    }
+
+    /// The visible 128×64 LCD image (1 byte per pixel, 1 = dark).
+    pub fn display_frame(&self) -> Vec<u8> {
+        self.bus.periphs.display.frame()
+    }
+
+    /// Changes whenever the LCD content changes.
+    pub fn display_generation(&self) -> u64 {
+        self.bus.periphs.display.generation
+    }
+
+    /// LED and backlight levels now.
+    pub fn lights(&mut self) -> crate::board::lp5562::Lights {
+        self.bus.periphs.lights(self.cpu.cycles)
+    }
+
     pub fn digest(&self) -> &Digest {
         &self.bus.digest
     }

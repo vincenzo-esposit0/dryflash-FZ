@@ -52,6 +52,10 @@ impl Bq25896 {
 }
 
 impl I2cDevice for Bq25896 {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn address(&self) -> u8 {
         0x6B
     }

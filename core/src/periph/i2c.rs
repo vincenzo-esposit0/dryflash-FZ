@@ -44,6 +44,10 @@ pub trait I2cDevice: std::fmt::Debug {
     /// Byte requested by the master.
     fn read(&mut self) -> u8;
     fn stop(&mut self) {}
+    /// Virtual time in ns, given before each bus access (for time-dependent devices).
+    fn set_time(&mut self, _now_ns: u128) {}
+    /// Downcasting, to read device state (e.g. LED levels) from the board model.
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 #[derive(Debug)]
@@ -70,6 +74,17 @@ impl I2c {
     pub fn reset(&mut self) {
         self.regs.reset();
         self.end_transfer();
+    }
+
+    pub fn set_time(&mut self, now_ns: u128) {
+        for d in &mut self.devices {
+            d.set_time(now_ns);
+        }
+    }
+
+    /// The device of type `T`, if attached.
+    pub fn device_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.devices.iter_mut().find_map(|d| d.as_any_mut().downcast_mut::<T>())
     }
 
     fn end_transfer(&mut self) {
@@ -246,6 +261,9 @@ mod tests {
         }
         fn read(&mut self) -> u8 {
             self.last.wrapping_add(1)
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
         }
     }
 

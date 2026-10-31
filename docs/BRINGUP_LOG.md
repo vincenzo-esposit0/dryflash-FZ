@@ -227,8 +227,9 @@ no unmapped access (CI checks 10 s).
   string in flash. Boot loops stop the run (default: 5 resets within 30 s virtual).
 - OTP provisioned with board data in the `FuriHalVersionOTPv2` layout (target 7, version 12,
   region World, name "dryflash"); these are the virtual-device settings of BRIEF §5.1.
-- USART1 stays silent by design: `furi_log_puts` only writes to registered log handlers
-  (furi/core/log.c), and with default settings none is attached to the serial port.
+- ~~USART1 stays silent by design~~ **Wrong — corrected in M3.** The boot tool printed
+  `usart[0]`, which was LPUART1: peripheral models were indexed in address order. USART1 does
+  carry the firmware log from the first `furi_hal_*_init` (see M3).
 
 ### Performance (Apple M5, native)
 
@@ -268,3 +269,52 @@ cargo run --release -p dryflash-core --example boot -- \
   --elf firmware/cache/official/flipper-z-f7-firmware-1.5.1.elf --cpu2-start 0x080D7000 --cycles 3840000000
 cargo test --workspace --release -- --include-ignored
 ```
+
+## M3 — First visible MVP
+
+### Checkpoint 1 — display, buttons, LEDs in the core
+
+- **ST7567 on SPI2** (board/st7567.rs): 132×9-page RAM, page/column addressing, start line,
+  SEG/COM reverse, inverse/all-on, contrast, reset on a falling RST edge. A byte is routed to the
+  controller when CS (PC11) is low; A0 (PB1) selects data/command (furi_hal_resources.c,
+  furi_hal_spi_config.c). The firmware's default orientation is ADC normal + COM reverse (`A0`,
+  `C8`), x offset 0, so glass pixel (x, y) is SEG x, line y.
+- **LP5562 at 0x30 on I2C1** (board/lp5562.rs): registers, LED map, chip enable, the three
+  program engines evaluated lazily against virtual time (ramp/wait/set PWM/branch/end as used
+  by `lp5562_execute_ramp`/`_blink`). White is the LCD backlight.
+- **Buttons** (board::Button): Up PB10, Down PC6, Right PB12, Left PB11, Back PC13 active low
+  with pull-ups; OK PH3 active high with pull-down. A press drives the pin; level changes raise
+  EXTI edges on the line's port selected by `SYSCFG_EXTICRx`.
+- **Bug fixed (since M2): SPI and USART models were indexed by address**, so `spi[0]` was SPI2
+  and `usart[0]` LPUART1 — the USART1 and LPUART1 NVIC lines were swapped and the boot tool
+  printed the wrong port. Fixed indices now (SPI1/SPI2, USART1/LPUART1).
+- **USART1 log** is now visible (3.2 KB in 10 s): HAL init, gauge data-memory provisioning on a
+  fresh BQ27220 ("Incorrect configuration data, reset needed" → "Updating data memory", as on a
+  new board), "Boot mode 0, starting services", "Startup complete", animation
+  `L1_NoSd_128x49`, "C2 startup failed".
+- **Result:** at 5 s the LCD shows the Desktop with the "Need an SD card" animation, status bar
+  and battery; backlight 252/255. `boot --png` writes a 4× screenshot.
+- **Input path verified to the GUI:** OK → PH3 → EXTI3 → `EXTI3_IRQHandler` → `input_isr` →
+  input service debounce → `furi_pubsub_publish` (Press, Short, Release) →
+  `view_dispatcher_input_callback`.
+
+### Finding: without CPU2 the Desktop deadlocks (ADR-0011 assumption broken)
+
+`desktop_srv` never reaches `view_dispatcher_run`, so the Desktop never handles input. It
+blocks in `furi_hal_crypto_enclave_verify` → `furi_hal_crypto_enclave_load_key`
+(targets/f7/furi_hal/furi_hal_crypto.c): the function takes `furi_hal_crypto_mutex`, and when
+`furi_hal_bt_is_alive()` is false it leaves through `break` **without releasing the mutex**; the
+next key slot waits on the same non-recursive mutex forever. On hardware CPU2 is always alive,
+so this path is never taken there. ADR-0011 ("the firmware supports a missing CPU2") is
+therefore wrong for the UI.
+
+The firmware does support a CPU2 that is alive but has no usable radio stack
+(furi_hal_bt.c: "Unsupported radio stack — Don't stop SHCI for crypto enclave support"):
+`ble_glue_is_alive()` is true once the C2 ready system event arrives
+(`ble_sys_user_event_callback`), and FUS key commands get SHCI responses.
+
+### Performance (Apple M5, native)
+
+| Workload | M2 | M3 CP1 |
+|---|---|---|
+| Official 1.5.1, 10 s virtual | — | 97 MIPS, 2.5 s wall |

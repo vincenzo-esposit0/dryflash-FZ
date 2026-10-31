@@ -297,6 +297,53 @@ mod tests {
         assert!(bus.digest.unmapped.contains_key(&0x3000_0000));
     }
 
+    /// Button wiring (board::Button::pin) through GPIO, SYSCFG_EXTICRx and EXTI to the NVIC.
+    #[test]
+    fn button_press_reaches_exti_through_exticr() {
+        use crate::board::Button;
+        use crate::periph::{irq, svd::EXTI};
+        const GPIOB: u32 = 0x4800_0400;
+        const GPIOH: u32 = 0x4800_1C00;
+        const SYSCFG: u32 = 0x4001_0000;
+        const EXTI_BASE: u32 = 0x5800_0800;
+        let mut bus = SystemBus::new();
+        let w = |bus: &mut SystemBus, a: u32, v: u32| bus.write(a, v, Size::Word).unwrap();
+        // Left = PB11 (input, pull-up), OK = PH3 (input, pull-down), as furi_hal_resources.c.
+        w(&mut bus, GPIOB, 0);
+        w(&mut bus, GPIOB + 0x0C, 1 << 22);
+        w(&mut bus, GPIOH, 0);
+        w(&mut bus, GPIOH + 0x0C, 2 << 6);
+        w(&mut bus, SYSCFG + 0x10, 1 << 12); // EXTICR3: line 11 ← port B
+        w(&mut bus, SYSCFG + 0x08, 7 << 12); // EXTICR1: line 3 ← port H
+        w(&mut bus, EXTI_BASE + EXTI.offset_of("RTSR1"), (1 << 11) | (1 << 3));
+        w(&mut bus, EXTI_BASE + EXTI.offset_of("FTSR1"), (1 << 11) | (1 << 3));
+        w(&mut bus, EXTI_BASE + EXTI.offset_of("C1IMR1"), (1 << 11) | (1 << 3));
+        let pr1 = EXTI_BASE + EXTI.offset_of("PR1");
+        let idr = |bus: &mut SystemBus, port: u32| bus.read(port + 0x10, Size::Word).unwrap();
+        assert_eq!(bus.read(pr1, Size::Word).unwrap(), 0, "no edge from configuration");
+        assert_ne!(idr(&mut bus, GPIOB) & (1 << 11), 0, "released: pulled up");
+
+        bus.periphs.set_button(Button::Left, true);
+        assert_eq!(idr(&mut bus, GPIOB) & (1 << 11), 0, "pressed: active low");
+        assert_eq!(bus.read(pr1, Size::Word).unwrap(), 1 << 11);
+        assert_ne!(bus.irq_lines() & (1 << irq::EXTI15_10), 0);
+        w(&mut bus, pr1, 1 << 11);
+        bus.periphs.set_button(Button::Left, false);
+        assert_eq!(bus.read(pr1, Size::Word).unwrap(), 1 << 11, "release edge");
+        w(&mut bus, pr1, 1 << 11);
+
+        bus.periphs.set_button(Button::Ok, true);
+        assert_ne!(idr(&mut bus, GPIOH) & (1 << 3), 0, "OK is active high");
+        assert_eq!(bus.read(pr1, Size::Word).unwrap(), 1 << 3);
+        assert_ne!(bus.irq_lines() & (1 << irq::EXTI3), 0);
+        w(&mut bus, pr1, 1 << 3);
+
+        // Line 11 routed to port A: PB11 edges no longer reach EXTI.
+        w(&mut bus, SYSCFG + 0x10, 0);
+        bus.periphs.set_button(Button::Left, true);
+        assert_eq!(bus.read(pr1, Size::Word).unwrap(), 0);
+    }
+
     #[test]
     fn flash_size_engineering_byte() {
         let mut bus = SystemBus::new();

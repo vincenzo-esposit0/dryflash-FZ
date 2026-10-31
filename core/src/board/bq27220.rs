@@ -159,6 +159,10 @@ impl Bq27220 {
 }
 
 impl I2cDevice for Bq27220 {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn address(&self) -> u8 {
         0x55
     }
