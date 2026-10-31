@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # ADR-0011 — CPU2 is not emulated; the firmware's "C2 startup failed" path is used
 
-- Status: **Accepted**
+- Status: **Superseded** by [ADR-0012](0012-cpu2-fus-model.md) (M3)
 - Date: 2026-10-31
 - Milestone: M2
 

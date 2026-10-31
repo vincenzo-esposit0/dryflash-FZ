@@ -173,27 +173,24 @@ and the host is in the allowlist, retry through `/proxy`. Local drag & drop neve
 
 ## 5. CPU2
 
-**Decision (ADR-0011): CPU2 is not emulated.** HSEM and IPCC are modelled on the CPU1 side and the
-firmware takes its own "C2 startup failed" path (`ble_glue_wait_for_c2_start` times out): services
-run, Bluetooth is unavailable. The plan below is kept for a possible radio-idle model later.
+**Decision (ADR-0012, supersedes ADR-0011): CPU2 is a behavioural FUS without a wireless stack.**
+CPU2's code (ST's encrypted FUS and stack) is not executed. A model in `core/src/bus/cpu2.rs`
+answers the mailbox the way a device whose wireless stack was removed does:
 
-### 5.1 Original plan (not pursued in M2)
+1. On `PWR_CR4.C2BOOT` it writes the FUS device-info table (validity keyword, FUS 1.2.0, stack
+   version 0) where the reference table points and posts the `SHCI_SUB_EVT_CODE_READY` system
+   event with `FUS_FW_RUNNING`. The firmware logs "C2 boot completed, mode: FUS" and
+   "Stack isn't installed!"; Bluetooth stays off, `furi_hal_bt_is_alive()` is true.
+2. System commands are answered synchronously (CPU1 spins on the IPCC flag): `FUS_GET_STATE` →
+   idle; every other command fails (status 0x01) — no factory keys ("No Factory Keys Found" popup),
+   no user key storage, no `SetSystemClock`.
+3. Released event buffers (IPCC channel 4) are taken back at once.
+4. The virtual device ships with Settings → System → Sleep Method = **Legacy** (RTC backup
+   register), because the default STOP2 path needs the stack's `SetSystemClock` and otherwise
+   spins without WFI.
 
-Goal: CPU1 sees a responsive CPU2 (FUS + wireless stack) and either boots BT idle or takes the
-graceful "BT unavailable" path — whichever runs cleanly. Work items (all to be derived from the
-firmware source, BRIEF §5.3):
-
-1. Read `furi_hal_bt.c`, `ble_glue/` (`ble_glue.c`, `ble_system.c`, `shci` wrappers) and ST's
-   `shci`/`tl_mbox` to list what CPU1 reads: device-info table in SRAM2 (FUS/stack versions),
-   `C2_READY` system event, SHCI command/response pairs over IPCC channels.
-2. Implement IPCC registers with real channel semantics (flags, masks, IRQs).
-3. On CPU1's `C2BOOT` (PWR_CR4) write, schedule the "system ready" event after a short virtual delay
-   and populate the info tables. Respond to each SHCI command with a well-formed response.
-4. Secure-enclave / key-storage requests (`furi_hal_crypto`): **ADR** — preferred option is a defined
-   failure response that the firmware handles (no fake key storage), unless that breaks boot.
-5. HSEM implemented for real (CPU1 and CPU2 semaphores, with CPU2 never holding a lock longer than its stub needs).
-
-Prior art (tITAZ314/flipper-emu bring-up log) is read for pitfalls; anything ported is credited.
+Why not "no CPU2": with CPU2 dead, `furi_hal_crypto_enclave_load_key` leaves without releasing
+its mutex and `desktop_srv` deadlocks on the next key slot (BRINGUP_LOG M3).
 
 ---
 

@@ -42,7 +42,7 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
   (ns) and peripheral events on the CPU loop and WFI fast-forward
 - ☑ RCC (clock tree, ready flags, reset flags, backup domain), GPIO, EXTI, I2C, SPI, USART/LPUART,
   RTC (calendar, backup registers), HSEM, IPCC, RNG (deterministic), LPTIM1/2 (tickless idle)
-- ☑ CPU2: not emulated, firmware's "C2 startup failed" path (ADR-0011)
+- ☑ CPU2: not emulated, firmware's "C2 startup failed" path (ADR-0011; superseded in M3 by ADR-0012)
 - ☑ Board: BQ27220 fuel gauge, BQ25896 charger on I2C1; OTP provisioned with board data
 - ☑ Furi crash record decoding (RTC BKP4R) and boot-loop detection
 - ☑ Boot test: reset vector → `flipper_init`, then 10 s with no fault or reset

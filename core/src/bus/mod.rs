@@ -5,6 +5,7 @@
 //! its registers read as zero, ignore writes, and every access is recorded in the
 //! bring-up digest (QEMU-style "unimplemented device" semantics — never a fake value).
 
+pub mod cpu2;
 pub mod map;
 
 use crate::cpu::{Bus, BusError, Size};
@@ -34,6 +35,10 @@ pub struct SystemBus {
     /// Current virtual time, updated by the machine before each CPU slice.
     pub now: u64,
     access_pc: u32,
+    /// Virtual-device setting: Settings → System → Sleep Method = Legacy (ADR-0012).
+    pub legacy_sleep: bool,
+    /// CPU2 behavioural model (FUS without wireless stack, ADR-0012).
+    pub cpu2: cpu2::Cpu2,
 }
 
 impl Default for SystemBus {
@@ -79,6 +84,8 @@ impl SystemBus {
             periphs: Periphs::new(),
             now: 0,
             access_pc: 0,
+            cpu2: cpu2::Cpu2::default(),
+            legacy_sleep: true,
         };
         // A virtual device ships provisioned, like a production unit (BRIEF §5.1).
         bus.provision_otp(&crate::board::otp::BoardInfo::default());
@@ -102,6 +109,21 @@ impl SystemBus {
     /// Resets the peripherals; memories are handled by `power_on_clear`.
     pub fn reset_peripherals(&mut self, kind: ResetKind) {
         self.periphs.reset(kind, self.now);
+        self.cpu2.reset();
+        if kind == ResetKind::PowerOn && self.legacy_sleep {
+            self.preset_backup_domain();
+        }
+    }
+
+    /// The backup domain of a device whose user chose Sleep Method = Legacy
+    /// (applications/settings/system/system_settings.c): Furi's RTC header
+    /// (`FURI_HAL_RTC_HEADER_MAGIC` 0x10F1, version 0, targets/f7/furi_hal/furi_hal_rtc.c) and
+    /// `SystemReg.flags` = `FuriHalRtcFlagLegacySleep` (bit 5, furi_hal_rtc.h), every other field
+    /// at the default `furi_hal_rtc_reset_registers` writes. With CPU2 in FUS mode the default
+    /// (STOP2) sleep cannot switch clocks and never reaches WFI (ADR-0012).
+    fn preset_backup_domain(&mut self) {
+        self.periphs.rtc.set_backup(0, 0x0000_10F1);
+        self.periphs.rtc.set_backup(1, (1 << 5) << 8);
     }
 
     /// RAM contents are lost on power-on reset; a system reset keeps them (only the
@@ -182,6 +204,9 @@ impl Bus for SystemBus {
             pc: self.access_pc,
         };
         if self.periphs.write(addr, value, size, &mut ctx) {
+            if addr == cpu2::PWR_CR4 || addr.wrapping_sub(crate::periph::svd::IPCC.base) < 0x400 {
+                self.cpu2_service();
+            }
             return Ok(());
         }
         let in_flash =

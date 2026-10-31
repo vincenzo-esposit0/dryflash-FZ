@@ -423,6 +423,17 @@ impl Periphs {
         }
     }
 
+    /// Register-file content at `addr`, without side effects (for board models).
+    pub fn peek(&self, addr: u32) -> Option<u32> {
+        let (base, slot) = self.slot(addr)?;
+        Some(self.regfile(slot).get((addr - base) & !3))
+    }
+
+    /// Recomputes the interrupt lines after a board model changed peripheral state.
+    pub fn refresh_irqs(&mut self) {
+        self.update_irqs();
+    }
+
     /// Reads a peripheral register; `None` if `addr` is not in a peripheral block.
     pub fn read(&mut self, addr: u32, size: Size, ctx: &mut Ctx) -> Option<u32> {
         let (base, slot) = self.slot(addr)?;
@@ -628,12 +639,12 @@ impl Periphs {
             (
                 "IPCC",
                 Partial,
-                "CPU1 side of the mailboxes; CPU2 never answers (ADR-0011)",
+                "CPU1 side of the mailboxes; CPU2 side driven by the FUS model (ADR-0012)",
             ),
             (
                 "CPU2 (radio core)",
                 Stubbed,
-                "not emulated: firmware takes its 'C2 startup failed' path, no Bluetooth",
+                "not executed: behavioural FUS without wireless stack; no Bluetooth, no factory keys (ADR-0012)",
             ),
         ];
         for g in &self.generic {

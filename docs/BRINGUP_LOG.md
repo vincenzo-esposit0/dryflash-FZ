@@ -313,8 +313,41 @@ The firmware does support a CPU2 that is alive but has no usable radio stack
 `ble_glue_is_alive()` is true once the C2 ready system event arrives
 (`ble_sys_user_event_callback`), and FUS key commands get SHCI responses.
 
+### Checkpoint 1b — CPU2 as a FUS without wireless stack (ADR-0012)
+
+- Transport layer read from the pinned `lib/stm32wb_copro` (commit `133182d`, fetched into
+  `firmware/cache/src/stm32wb_copro`; the sparse firmware clone has no submodules):
+  reference table at `SRAM2A_BASE + IPCCDBA*4` (IPCCDBA reads 0 → `TL_RefTable` at 0x20030000),
+  system command/response on IPCC channel 2 (CPU1 spins on the flag), system events on the queue
+  in `TL_SysTable`, buffer release on channel 4.
+- Model (`core/src/bus/cpu2.rs`): on C2BOOT writes the FUS device-info table and posts the ready
+  event (`FUS_FW_RUNNING`); `FUS_GET_STATE` → idle; every other SHCI command → status 0x01.
+- Firmware log now: "Core2 started", "C2 boot completed, mode: FUS",
+  "Core2: FUS: 1.2.0 … Stack: 0.0.0", "Stack isn't installed!", "Radio stack start failed",
+  "Secure Enclave verification failed: total 0, valid 0". SHCI opcodes seen: 0xFC59
+  (`FUS_LOAD_USR_KEY`), and 0xFC79 (`SetSystemClock`) until Legacy sleep was preset.
+- **Sleep:** with CPU2 alive the idle task uses STOP2, which asks CPU2 for `SetSystemClock`
+  (stack ≥ 1.20 only); the FUS refuses, `furi_hal_power_deep_sleep` returns before WFI and idle
+  spins (640 M instructions in 640 M cycles, 45 MIPS, slower than real time). The virtual device
+  now ships with Sleep Method = Legacy in the RTC backup domain (maintainer decision, ADR-0012):
+  plain WFI, fast-forward works again.
+- **Result:** the firmware is interactive. At 5 s: "No Factory Keys Found / Secure Enclave is
+  damaged" popup (the firmware's own); Back → Desktop ("Need an SD card" animation); OK → main
+  menu (Apps, Sub-GHz, 125 kHz RFID, NFC, …); Down moves the selection. No faults, no unmapped
+  accesses, no resets.
+
 ### Performance (Apple M5, native)
 
-| Workload | M2 | M3 CP1 |
-|---|---|---|
-| Official 1.5.1, 10 s virtual | — | 97 MIPS, 2.5 s wall |
+| Workload | M2 | M3 CP1 | M3 CP1b |
+|---|---|---|---|
+| Official 1.5.1, 10 s virtual | — | 97 MIPS, 2.5 s wall | 135 MIPS, 1.2 s wall (163 M instructions) |
+
+### Demo
+
+```sh
+node scripts/fetch-firmware.mjs official --elf
+cargo run --release -p dryflash-core --example boot -- \
+  firmware/cache/official/f7-update-1.5.1/firmware.dfu \
+  --elf firmware/cache/official/flipper-z-f7-firmware-1.5.1.elf --cpu2-start 0x080D7000 --png screen.png
+cargo test --workspace --release -- --include-ignored
+```
