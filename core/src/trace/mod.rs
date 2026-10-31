@@ -2,3 +2,4 @@
 //! Tracing and bring-up diagnostics.
 
 pub mod digest;
+pub mod png;

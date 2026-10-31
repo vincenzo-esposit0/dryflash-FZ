@@ -113,6 +113,14 @@ pub struct Periphs {
     /// Virtual time base: `tb_ns` nanoseconds at cycle `tb_cycles`, HCLK1 = `tb_hz` since.
     tb_cycles: u64,
     tb_ns: u128,
+    /// LCD controller on SPI2 (board wiring in `crate::board`).
+    pub display: crate::board::st7567::St7567,
+    /// GPIO levels after the last update, per port (edge detection for EXTI and board).
+    last_levels: [u16; 6],
+    /// Index of SYSCFG in `generic` (EXTICRx select the GPIO port of each EXTI line).
+    syscfg: Option<usize>,
+    /// Buttons currently held by the user.
+    pub buttons_down: Vec<crate::board::Button>,
 }
 
 impl Default for Periphs {
@@ -125,8 +133,8 @@ impl Periphs {
     pub fn new() -> Self {
         let mut descs: Vec<&'static PeriphDesc> = svd::ALL.iter().filter(|d| !CORE_BLOCKS.contains(&d.name)).collect();
         descs.sort_by_key(|d| d.base);
-        let (mut gpio, mut i2c, mut spi, mut usart, mut generic) =
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (mut gpio, mut i2c, mut generic) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut spi, mut usart) = ([None, None], [None, None]);
         let mut lptim = Vec::new();
         let mut map = Vec::new();
         for (i, d) in descs.iter().enumerate() {
@@ -145,13 +153,17 @@ impl Periphs {
                     i2c.push(i2c::I2c::new(d));
                     Slot::I2c(i2c.len() - 1)
                 }
+                // Fixed indices (SPI1 = 0, SPI2 = 1; USART1 = 0, LPUART1 = 1): blocks are
+                // visited by address, which would put SPI2 and LPUART1 first.
                 "SPI1" | "SPI2" => {
-                    spi.push(spi::Spi::new(d));
-                    Slot::Spi(spi.len() - 1)
+                    let i = (d.name == "SPI2") as usize;
+                    spi[i] = Some(spi::Spi::new(d));
+                    Slot::Spi(i)
                 }
                 "USART1" | "LPUART1" => {
-                    usart.push(usart::Usart::new(d));
-                    Slot::Usart(usart.len() - 1)
+                    let i = (d.name == "LPUART1") as usize;
+                    usart[i] = Some(usart::Usart::new(d));
+                    Slot::Usart(i)
                 }
                 "RTC" => Slot::Rtc,
                 "HSEM" => Slot::Hsem,
@@ -171,15 +183,20 @@ impl Periphs {
         // Board wiring (targets/f7/furi_hal/furi_hal_i2c_config.c): I2C1 is the power bus.
         i2c[0].devices.push(Box::new(crate::board::bq27220::Bq27220::new()));
         i2c[0].devices.push(Box::new(crate::board::bq25896::Bq25896::new()));
+        i2c[0].devices.push(Box::new(crate::board::lp5562::Lp5562::new()));
         let rcc = rcc::Rcc::new();
         let clocks = rcc.clocks();
+        let syscfg = generic.iter().position(|g: &RegFile| g.desc.name == "SYSCFG_VREFBUF");
         Periphs {
             rcc,
             gpio,
             exti: exti::Exti::new(),
             i2c,
-            spi,
-            usart,
+            spi: spi.into_iter().map(|s| s.expect("SPI1 and SPI2 in the SVD")).collect(),
+            usart: usart
+                .into_iter()
+                .map(|u| u.expect("USART1 and LPUART1 in the SVD"))
+                .collect(),
             rtc: rtc::Rtc::new(),
             hsem: hsem::Hsem::new(),
             ipcc: ipcc::Ipcc::new(),
@@ -193,6 +210,84 @@ impl Periphs {
             next_event: None,
             tb_cycles: 0,
             tb_ns: 0,
+            syscfg,
+            display: crate::board::st7567::St7567::new(),
+            last_levels: [0; 6],
+            buttons_down: Vec::new(),
+        }
+    }
+
+    fn levels(&self) -> [u16; 6] {
+        let mut l = [0u16; 6];
+        for (i, g) in self.gpio.iter().enumerate() {
+            l[i] = g.levels();
+        }
+        l
+    }
+
+    /// Reacts to GPIO level changes: EXTI edges (port selected by SYSCFG_EXTICRx) and board
+    /// signals (display reset on a falling RST edge).
+    fn gpio_changed(&mut self) {
+        let now = self.levels();
+        if now == self.last_levels {
+            return;
+        }
+        let syscfg = self.syscfg.map(|i| {
+            let g = &self.generic[i];
+            [g.get(0x08), g.get(0x0C), g.get(0x10), g.get(0x14)]
+        });
+        for port in 0..6 {
+            let changed = now[port] ^ self.last_levels[port];
+            if changed == 0 {
+                continue;
+            }
+            // EXTICR port codes: 0 PA, 1 PB, 2 PC, 3 PD, 4 PE, 7 PH.
+            let code = [0u32, 1, 2, 3, 4, 7][port];
+            for line in 0..16u32 {
+                if changed & (1 << line) == 0 {
+                    continue;
+                }
+                let sel = syscfg
+                    .map(|r| (r[(line / 4) as usize] >> ((line % 4) * 4)) & 7)
+                    .unwrap_or(0);
+                if sel == code {
+                    self.exti.edge(line, now[port] & (1 << line) != 0);
+                }
+            }
+        }
+        let (rp, rpin) = crate::board::DISPLAY_RST;
+        if self.last_levels[rp] & (1 << rpin) != 0 && now[rp] & (1 << rpin) == 0 {
+            self.display.reset();
+        }
+        self.last_levels = now;
+        self.update_irqs();
+    }
+
+    fn drive_button(&mut self, b: crate::board::Button, pressed: bool) {
+        let (port, pin, active_high) = b.pin();
+        // Pressed: the button drives its active level; released: only the pull remains.
+        self.gpio[port].drive(pin, pressed.then_some(active_high));
+    }
+
+    /// Presses or releases a button (user input).
+    pub fn set_button(&mut self, b: crate::board::Button, pressed: bool) {
+        self.buttons_down.retain(|x| *x != b);
+        if pressed {
+            self.buttons_down.push(b);
+        }
+        self.drive_button(b, pressed);
+        self.gpio_changed();
+    }
+
+    /// LED and backlight levels at virtual time `now` (cycles).
+    pub fn lights(&mut self, now: u64) -> crate::board::lp5562::Lights {
+        let ns = self.now_ns(now);
+        match self.i2c[0].device_mut::<crate::board::lp5562::Lp5562>() {
+            Some(l) => {
+                l.now_ns = ns;
+                l.lights()
+            }
+            None => Default::default(),
         }
     }
 
@@ -226,6 +321,11 @@ impl Periphs {
             self.rtc.reset(ns);
         }
         self.gpio.iter_mut().for_each(|g| g.reset());
+        // Held buttons keep driving their pins across resets.
+        for b in self.buttons_down.clone() {
+            self.drive_button(b, true);
+        }
+        self.last_levels = self.levels();
         self.exti.reset();
         self.i2c.iter_mut().for_each(|i| i.reset());
         self.spi.iter_mut().for_each(|s| s.reset());
@@ -385,7 +485,17 @@ impl Periphs {
         let off = addr - base;
         let word_off = off & !3;
         if let Slot::Spi(i) = slot {
-            if !self.spi[i].write(off, value, size) {
+            // SPI2 carries the display (and the SD card from M4); devices answer when their
+            // chip select is low. SPI1 devices (radio, NFC) are not attached: MISO reads 0xFF.
+            let Periphs { spi, gpio, display, .. } = self;
+            let mut route = |mosi: u8| -> u8 {
+                let level = |(port, pin): (usize, u8)| gpio[port].levels() & (1 << pin) != 0;
+                if i == 1 && !level(crate::board::DISPLAY_CS) {
+                    display.write(mosi, level(crate::board::DISPLAY_A0));
+                }
+                0xFF
+            };
+            if !spi[i].write(off, value, size, &mut route) {
                 ctx.digest.unimplemented(addr, true, Some(value), ctx.pc);
             }
             return true;
@@ -449,13 +559,19 @@ impl Periphs {
                 self.schedule();
                 h
             }
-            Slot::Gpio(i) => self.gpio[i].write(word_off, value),
+            Slot::Gpio(i) => {
+                let h = self.gpio[i].write(word_off, value);
+                self.gpio_changed();
+                h
+            }
             Slot::Exti => {
                 let h = self.exti.write(word_off, value);
                 self.update_irqs();
                 h
             }
             Slot::I2c(i) => {
+                let ns = self.now_ns(ctx.now);
+                self.i2c[i].set_time(ns);
                 let h = self.i2c[i].write(word_off, value);
                 self.irq_dirty = true;
                 h

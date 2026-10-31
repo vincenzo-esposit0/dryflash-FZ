@@ -3,9 +3,9 @@
 //! interface"; registers and bit positions from the SVD).
 //!
 //! Frames are exchanged instantly: a write to DR sends each frame (8-bit frames; a 16-bit
-//! access with DS ≤ 8 bits packs two) to the selected device and queues the reply in the
-//! RX FIFO (4 bytes; overflow sets OVR and drops data, as on hardware). With no device the
-//! MISO line reads 0xFF. Device selection by chip-select GPIOs is wired in M3.
+//! access with DS ≤ 8 bits packs two) through the `transfer` function supplied by the owner,
+//! which routes it to the device whose chip select is active (board wiring), and queues the
+//! reply in the RX FIFO (4 bytes; overflow sets OVR and drops data, as on hardware).
 
 use super::regfile::{PeriphDesc, RegFile};
 use super::svd;
@@ -22,17 +22,10 @@ const SR_OVR: u32 = 1 << 6;
 const CR2: u32 = svd::SPI1.offset_of("CR2");
 const RX_FIFO_BYTES: usize = 4;
 
-/// A device on an SPI bus: one byte in, one byte out.
-pub trait SpiDevice: std::fmt::Debug {
-    fn transfer(&mut self, mosi: u8) -> u8;
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Spi {
     pub regs: RegFile,
     rx: VecDeque<u8>,
-    /// Currently selected device (by chip select), if any.
-    pub device: Option<Box<dyn SpiDevice>>,
     /// Set by a DR read so that the next SR read clears OVR (RM0434 clearing sequence).
     ovr_clear_armed: bool,
 }
@@ -42,7 +35,6 @@ impl Spi {
         Spi {
             regs: RegFile::new(desc),
             rx: VecDeque::new(),
-            device: None,
             ovr_clear_armed: false,
         }
     }
@@ -98,7 +90,8 @@ impl Spi {
         }
     }
 
-    pub fn write(&mut self, off: u32, v: u32, size: Size) -> bool {
+    /// Register write; DR writes exchange frames through `transfer` (MOSI → MISO).
+    pub fn write(&mut self, off: u32, v: u32, size: Size, transfer: &mut dyn FnMut(u8) -> u8) -> bool {
         if off != DR {
             return self.regs.write(off, v);
         }
@@ -108,7 +101,7 @@ impl Spi {
         let frames = if size == Size::Byte { 1 } else { 2 };
         for i in 0..frames {
             let mosi = (v >> (8 * i)) as u8;
-            let miso = self.device.as_mut().map(|d| d.transfer(mosi)).unwrap_or(0xFF);
+            let miso = transfer(mosi);
             if self.rx.len() < RX_FIFO_BYTES {
                 self.rx.push_back(miso);
             } else {

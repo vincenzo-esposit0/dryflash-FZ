@@ -3,7 +3,7 @@
 //! where time was spent, and the bring-up digest (BRIEF §8).
 //!
 //! usage: cargo run --release -p dryflash-core --example boot -- <firmware.dfu>
-//!            [--elf firmware.elf] [--cycles N] [--cpu2-start 0x080D7000]
+//!            [--elf firmware.elf] [--cycles N] [--cpu2-start 0x080D7000] [--png screen.png]
 
 use dryflash_core::cpu::Stop;
 use dryflash_core::loader::{dfu, elf::Symbols};
@@ -155,6 +155,20 @@ fn main() {
             c.at_ns as f64 / 1e9,
             c.message.as_deref().unwrap_or("(message not decodable)")
         );
+    }
+    let lights = m.lights();
+    println!(
+        "LEDs: red {} green {} blue {} backlight {}; display generation {}",
+        lights.red,
+        lights.green,
+        lights.blue,
+        lights.white,
+        m.display_generation()
+    );
+    if let Some(p) = opt("--png") {
+        let png = dryflash_core::trace::png::lcd(&m.display_frame(), 4, lights.white > 0);
+        std::fs::write(&p, png).expect("write PNG");
+        println!("display written to {p}");
     }
     print!("{}", m.digest().render(&|pc| sym(pc), 12));
     let log = &m.bus.periphs.usart[0].tx;
