@@ -1,6 +1,6 @@
 # dryflash — Roadmap
 
-Status: **approved 2026-10-31**; M0 and M1 done. Milestones follow BRIEF §12. Each milestone ends with: passing tests,
+Status: **approved 2026-10-31**; M0, M1 and M2 done. Milestones follow BRIEF §12. Each milestone ends with: passing tests,
 updated `docs/BRINGUP_LOG.md`, a short demo instruction, a commit, and a stop-and-report.
 
 Legend: ☐ todo · ◐ in progress · ☑ done
@@ -36,19 +36,21 @@ Legend: ☐ todo · ◐ in progress · ☑ done
 **DoD met:** pinned official `.dfu` executes from the reset vector through `SystemInit` and `main`
 into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG § M1).
 
-## M2 — System bring-up
+## M2 — System bring-up ☑ (2026-10-31)
 
-- ☐ RCC first: enable/reset registers that latch (the M1 boot loop is `furi_check` in `furi_hal_bus_enable`), ready flags, clock tree for timer rates
-- ☐ PWR, FLASH controller (+ option bytes, ACR), HSEM, IPCC, SYSCFG/EXTI (digest order: PWR, RCC, GPIO, SYSCFG, EXTI, FLASH, RTC)
-- ☐ CPU2 behavioural stub (ADR: secure-enclave behaviour)
-- ☐ OTP provisioning from `furi_hal_version` layout
-- ☐ RTC + backup registers (survive soft reset), IWDG, RNG (seeded), CRC, DWT CYCCNT, MPU
-- ☐ Timers/LPTIM, EXTI, GPIO, DMA/DMAMUX, I2C, SPI cores; board devices initialise (stubs declared)
-- ☐ Virtual-time scheduler + WFI fast-forward; determinism test
-- ☐ Reset/boot-loop detection; decode the Furi crash record in RTC backup registers
-- ☐ Cycle model (instruction timings, exception entry/exit) and per-instruction cost back to M0 level in wasm
+- ☑ Peripheral register files from ST's SVD (ADR-0010); NVIC interrupt lines; virtual time base
+  (ns) and peripheral events on the CPU loop and WFI fast-forward
+- ☑ RCC (clock tree, ready flags, reset flags, backup domain), GPIO, EXTI, I2C, SPI, USART/LPUART,
+  RTC (calendar, backup registers), HSEM, IPCC, RNG (deterministic), LPTIM1/2 (tickless idle)
+- ☑ CPU2: not emulated, firmware's "C2 startup failed" path (ADR-0011)
+- ☑ Board: BQ27220 fuel gauge, BQ25896 charger on I2C1; OTP provisioned with board data
+- ☑ Furi crash record decoding (RTC BKP4R) and boot-loop detection
+- ☑ Boot test: reset vector → `flipper_init`, then 10 s with no fault or reset
+- → M4: FLASH controller program/erase + option bytes (only the updater writes flash in 1.5.1)
+- → M3: wasm speed back to the M0 level; IWDG
+- → backlog: detailed instruction cycle model
 
-**DoD:** Furi kernel starts, services start, no boot loop; digest shows no unexpected gaps on the boot path.
+**DoD met:** Furi kernel starts, services start, no boot loop (BRINGUP_LOG § M2).
 
 ## M3 — First visible MVP
 
@@ -61,6 +63,7 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 
 ## M4 — SD card + `.tgz`
 
+- ☐ FLASH controller: unlock, program, page erase, option bytes (moved from M2)
 - ☐ SD SPI protocol, FAT32 image (OPFS / IndexedDB fallback)
 - ☐ `.tgz` + `update.fuf`; resources as `resources.ths` (heatshrink + tar) or `resources.tar.gz`, unpacked to `/ext`
 - ☐ Apps (`.fap`) launch from SD

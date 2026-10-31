@@ -68,7 +68,7 @@ impl SystemBus {
         let fs = (FLASHSIZE_ADDR - ENGI_BASE) as usize;
         // 1024 KiB of flash on the STM32WB55RG.
         engi[fs..fs + 2].copy_from_slice(&1024u16.to_le_bytes());
-        SystemBus {
+        let mut bus = SystemBus {
             flash: vec![0xFF; FLASH_SIZE as usize],
             sram1: vec![0; SRAM1_SIZE as usize],
             sram2a: vec![0; SRAM2A_SIZE as usize],
@@ -79,7 +79,17 @@ impl SystemBus {
             periphs: Periphs::new(),
             now: 0,
             access_pc: 0,
-        }
+        };
+        // A virtual device ships provisioned, like a production unit (BRIEF §5.1).
+        bus.provision_otp(&crate::board::otp::BoardInfo::default());
+        bus
+    }
+
+    /// Programs the board data into the OTP area (virtual device settings, BRIEF §5.1).
+    pub fn provision_otp(&mut self, info: &crate::board::otp::BoardInfo) {
+        self.otp.fill(0xFF);
+        let b = info.otp_bytes();
+        self.otp[..b.len()].copy_from_slice(&b);
     }
 
     /// Sets the 64-bit unique device ID (UID64), used by the firmware for the BLE address

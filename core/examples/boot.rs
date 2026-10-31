@@ -149,6 +149,13 @@ fn main() {
             println!("  {n:>6}  {name}");
         }
     }
+    for c in &m.crashes {
+        println!(
+            "firmware crash at {:.3} s: {}",
+            c.at_ns as f64 / 1e9,
+            c.message.as_deref().unwrap_or("(message not decodable)")
+        );
+    }
     print!("{}", m.digest().render(&|pc| sym(pc), 12));
     let log = &m.bus.periphs.usart[0].tx;
     if !log.is_empty() {

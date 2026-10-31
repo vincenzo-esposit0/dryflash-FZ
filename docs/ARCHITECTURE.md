@@ -79,12 +79,10 @@ browser worker and Node runner but drives the same `Machine` API.
 | `trace/digest` | Bring-up digest: unimplemented registers by block/offset, unmapped accesses, events | M1 |
 | `loader/` | `dfu` (DfuSe), `elf` (symbols only); `.tgz` + `update.fuf`, heatshrink/tar/gzip in M4 | M1 / M4 |
 | `machine` | `Machine`: CPU + bus + decode cache; run loop with WFI fast-forward and SYSRESETREQ | M1 |
-| `periph/` | STM32WB55 peripherals (RCC, PWR, FLASH, HSEM, IPCC, GPIO, EXTI, SPI, I2C, DMA, TIMx, LPTIMx, RTC, IWDG, RNG, CRC, ADC, COMP, USART, USB, AES/PKA) | M2+ |
-| `cpu2/` | Behavioural CPU2 stub: IPCC channels + shared SRAM2 tables (§5) | M2 |
-| `board/` | f7 devices: ST7567, LP5562, BQ27220, BQ25896, SD (SPI), CC1101, ST25R3916, buttons, … | M2–M7 |
-| `sched/` | Virtual-time timeline for peripheral events | M2 |
+| `periph/` | Register files for every SVD peripheral (`svd.rs` generated, `regfile`); behavioural models: RCC, GPIO, EXTI, I2C, SPI, USART/LPUART, RTC, HSEM, IPCC, RNG, LPTIM; NVIC interrupt lines; virtual time base (ns) and peripheral event scheduling | M2 (more in M3–M7) |
+| `board/` | f7 devices: BQ27220, BQ25896, OTP board data (M2); ST7567, buttons, LP5562 (M3); SD (M4); CC1101, ST25R3916, … | M2–M8 |
 | `fs/` | FAT32 image creation and file injection | M4 |
-| `crash/` | Fault capture, `furi_crash` decoding, boot-loop / hang detection, report model | M6 |
+| `crash` | Furi crash record (RTC BKP4R) decoding (M2); fault capture, hang detection, report model (M6) | M2 / M6 |
 | `snapshot/` | Machine state save/restore | later |
 
 Every peripheral and device implements a common trait:
@@ -138,6 +136,11 @@ The PPB (SCB, NVIC, SysTick, DWT, MPU, FPU control at `0xE000_E000`) is handled 
 
 ### 3.4 Flash, OTP and option bytes
 
+M2 status: OTP is provisioned with board data (`board/otp.rs`, `FuriHalVersionOTPv2` layout).
+The FLASH controller is still a register file: program/erase and option bytes move to M4 because
+in firmware 1.5.1 only the updater (and the app API) programs the internal flash — settings live on
+the SD card (correction to BRIEF §5.1, rule 6).
+
 - Flash controller model implements unlock keys, page erase (4 KiB pages — verify RM0434),
   double-word programming, busy/EOP flags, error flags, and **write protection from `SFSA`**
   so CPU1 cannot overwrite the (absent) CPU2 stack region.
@@ -168,7 +171,13 @@ and the host is in the allowlist, retry through `/proxy`. Local drag & drop neve
 
 ---
 
-## 5. CPU2 behavioural stub
+## 5. CPU2
+
+**Decision (ADR-0011): CPU2 is not emulated.** HSEM and IPCC are modelled on the CPU1 side and the
+firmware takes its own "C2 startup failed" path (`ble_glue_wait_for_c2_start` times out): services
+run, Bluetooth is unavailable. The plan below is kept for a possible radio-idle model later.
+
+### 5.1 Original plan (not pursued in M2)
 
 Goal: CPU1 sees a responsive CPU2 (FUS + wireless stack) and either boots BT idle or takes the
 graceful "BT unavailable" path — whichever runs cleanly. Work items (all to be derived from the

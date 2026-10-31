@@ -166,6 +166,11 @@ impl Rtc {
         v
     }
 
+    /// Backup register BKPnR.
+    pub fn backup(&self, n: usize) -> u32 {
+        self.regs.get(BKP0R + 4 * n as u32)
+    }
+
     pub fn read(&mut self, off: u32, now_ns: u128) -> Option<u32> {
         match off {
             TR | DR | SSR => {

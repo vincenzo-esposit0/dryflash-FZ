@@ -56,14 +56,48 @@ pub enum RunExit {
     IdleForever { pc: u32 },
     /// The CPU stopped for another reason (watchpoint, lockup, emulator gap, …).
     Stopped(Stop),
+    /// Boot loop: `resets` system resets within the configured window (BRIEF §7).
+    BootLoop { resets: u32 },
+}
+
+/// Boot-loop threshold: `resets` system resets within `window_ns` of virtual time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BootLoopLimit {
+    pub resets: u32,
+    pub window_ns: u128,
+}
+
+impl Default for BootLoopLimit {
+    fn default() -> Self {
+        BootLoopLimit {
+            resets: 5,
+            window_ns: 30_000_000_000,
+        }
+    }
+}
+
+/// A firmware crash decoded from Furi's own record (crate::crash).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FirmwareCrash {
+    /// Virtual time of the reset that followed the crash, in ns.
+    pub at_ns: u128,
+    pub message_ptr: u32,
+    pub message: Option<String>,
 }
 
 pub struct Machine {
     pub cpu: Cpu,
     pub bus: SystemBus,
     cache: DecodeCache,
-    /// Number of system resets since power-on (boot-loop detection, M6).
+    /// Number of system resets since power-on.
     pub resets: u32,
+    /// Virtual times (ns) of the system resets inside the boot-loop window.
+    reset_times: Vec<u128>,
+    pub boot_loop: BootLoopLimit,
+    /// Firmware crashes reported by Furi before resetting, oldest first.
+    pub crashes: Vec<FirmwareCrash>,
+    /// Fault pointer already reported (Furi leaves it in the backup register).
+    last_fault: u32,
 }
 
 impl Default for Machine {
@@ -87,6 +121,10 @@ impl Machine {
             bus: SystemBus::new(),
             cache: DecodeCache::new(FLASH_BASE, FLASH_SIZE),
             resets: 0,
+            reset_times: Vec::new(),
+            boot_loop: BootLoopLimit::default(),
+            crashes: Vec::new(),
+            last_fault: 0,
         }
     }
 
@@ -134,6 +172,8 @@ impl Machine {
         self.bus.now = self.cpu.cycles;
         self.bus.reset_peripherals(ResetKind::PowerOn);
         self.resets = 0;
+        self.reset_times.clear();
+        self.last_fault = 0;
         self.reset_cpu("power-on reset");
     }
 
@@ -172,16 +212,53 @@ impl Machine {
                     None => break RunExit::IdleForever { pc },
                 },
                 Stop::ResetRequest { pc } => {
+                    self.note_firmware_crash();
                     self.resets += 1;
+                    let now = self.bus.periphs.now_ns(self.cpu.cycles);
+                    let window = self.boot_loop.window_ns;
+                    self.reset_times.push(now);
+                    self.reset_times.retain(|&t| now - t <= window);
                     self.bus.now = self.cpu.cycles;
                     self.bus.reset_peripherals(ResetKind::Software);
                     self.reset_cpu(&format!("SYSRESETREQ from pc 0x{pc:08X}"));
+                    if self.reset_times.len() as u32 >= self.boot_loop.resets {
+                        self.bus.digest.event(
+                            self.cpu.cycles,
+                            format!(
+                                "boot loop: {} resets within {} s",
+                                self.reset_times.len(),
+                                window / 1_000_000_000
+                            ),
+                        );
+                        break RunExit::BootLoop {
+                            resets: self.reset_times.len() as u32,
+                        };
+                    }
                 }
                 other => break RunExit::Stopped(other),
             }
         };
         self.drain_cpu_events();
         exit
+    }
+
+    /// Records a crash if Furi left a new fault pointer in the RTC backup register.
+    fn note_firmware_crash(&mut self) {
+        if let Some((ptr, message)) = crate::crash::furi_fault(&self.bus)
+            && ptr != self.last_fault
+        {
+            self.last_fault = ptr;
+            let at_ns = self.bus.periphs.now_ns(self.cpu.cycles);
+            let text = message.clone().unwrap_or_else(|| format!("message at 0x{ptr:08X}"));
+            self.bus
+                .digest
+                .event(self.cpu.cycles, format!("firmware crash: \"{text}\""));
+            self.crashes.push(FirmwareCrash {
+                at_ns,
+                message_ptr: ptr,
+                message,
+            });
+        }
     }
 
     fn drain_cpu_events(&mut self) {

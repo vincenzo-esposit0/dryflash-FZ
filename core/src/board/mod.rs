@@ -3,6 +3,7 @@
 
 pub mod bq25896;
 pub mod bq27220;
+pub mod otp;
 
 /// Battery state shown by the fuel gauge and charger (UI controls in M7).
 #[derive(Clone, Copy, Debug, PartialEq)]

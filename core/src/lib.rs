@@ -7,6 +7,7 @@
 pub mod board;
 pub mod bus;
 pub mod cpu;
+pub mod crash;
 pub mod loader;
 pub mod machine;
 pub mod periph;

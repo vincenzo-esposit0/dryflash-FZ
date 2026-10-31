@@ -165,7 +165,7 @@ python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 1
 
 ---
 
-## M2 — System bring-up (in progress)
+## M2 — System bring-up (2026-10-31)
 
 ### Checkpoint 1 (2026-10-31) — no more boot loop
 
@@ -207,3 +207,64 @@ python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 1
   ~90 % of the time; 60 s virtual run in 5.7 s wall (Apple M5, native).
 - Still register file only: PWR (pull-up/down control), SYSCFG, FLASH, DBGMCU, COMP, USB,
   TIM1, TIM17. Nothing has been printed on USART1 yet.
+
+### Closing (2026-10-31) — definition of done met
+
+**Furi kernel starts, services start, no boot loop.** The official 1.5.1 image boots through
+`flipper_init` and runs its services; over 60 s of virtual time there is no fault, no reset and
+no unmapped access (CI checks 10 s).
+
+| Milestone | Virtual time |
+|---|---|
+| `Reset_Handler` → `main` | 0.6 ms |
+| FreeRTOS scheduler started (`prvPortStartFirstTask`) | 7.9 ms |
+| `furi_hal_power_init` | 9.3 ms |
+| `furi_hal_bt_init` (after fuel-gauge provisioning) | 2.41 s |
+| `flipper_init` (services) | 2.42 s |
+
+- Furi crash records are decoded: on SYSRESETREQ the machine reads the fault-message pointer
+  that `__furi_crash_implementation` leaves in RTC BKP4R (`FuriHalRtcRegisterFaultData`) and the
+  string in flash. Boot loops stop the run (default: 5 resets within 30 s virtual).
+- OTP provisioned with board data in the `FuriHalVersionOTPv2` layout (target 7, version 12,
+  region World, name "dryflash"); these are the virtual-device settings of BRIEF §5.1.
+- USART1 stays silent by design: `furi_log_puts` only writes to registered log handlers
+  (furi/core/log.c), and with default settings none is attached to the serial port.
+
+### Performance (Apple M5, native)
+
+| Workload | M2 |
+|---|---|
+| CPU benchmark | 187–190 MIPS native, ~138 MIPS Node/wasm |
+| Official boot, active phases (I2C/SPI/peripheral polling) | 80–160 MIPS |
+| 60 s virtual incl. idle (CPU sleeps ~90 %) | 6.2 s wall (~10× real time) |
+
+### Stubbed / not emulated (fidelity table: `Periphs::fidelity()`)
+
+- CPU2 (radio core): not emulated, no Bluetooth (ADR-0011).
+- Register file only (SVD reset values, latched writes): PWR, SYSCFG, FLASH controller, DBGMCU,
+  COMP, USB, TIM1/2/16/17, DMA/DMAMUX, ADC, AES, PKA, CRC, LCD, TSC, SAI, QUADSPI, CRS, VREFBUF,
+  WWDG, IWDG.
+- I2C/SPI transfers are instant; SPI devices (display, SD, radios) are not attached yet (M3/M4).
+- Oscillators are ready at once; clock gating is not enforced.
+
+### Moved out of M2 (with reasons)
+
+- **FLASH program/erase and option bytes → M4.** In 1.5.1 only the updater
+  (applications/system/updater) and the app API program the internal flash; settings live on the
+  SD card. BRIEF §5.1 expects flash writes for "settings, storage and OTA": for this firmware
+  only OTA applies (rule 6 note, also in ARCHITECTURE §3.4).
+- **Detailed cycle model → backlog.** Virtual time is 1 cycle per instruction plus WFI
+  fast-forward; instruction timings only affect timing fidelity, which the brief does not promise.
+- **wasm speed back to the M0 level (~158 MIPS) → M3**, where the browser runner is built and
+  measured.
+- **IWDG → M3.** Not enabled by the firmware in the observed boot (register file only).
+
+### Demo
+
+```sh
+node scripts/fetch-firmware.mjs official --elf
+cargo run --release -p dryflash-core --example boot -- \
+  firmware/cache/official/f7-update-1.5.1/firmware.dfu \
+  --elf firmware/cache/official/flipper-z-f7-firmware-1.5.1.elf --cpu2-start 0x080D7000 --cycles 3840000000
+cargo test --workspace --release -- --include-ignored
+```
