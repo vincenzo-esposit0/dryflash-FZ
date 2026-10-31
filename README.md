@@ -38,7 +38,10 @@ Requirements: `rustup` (the toolchain is pinned in `rust-toolchain.toml`), Node.
 tests/build-fw.sh                              # bare-metal test firmwares (benchmark, exception model)
 node scripts/fetch-firmware.mjs official --elf # pinned official firmware, hash-checked, into firmware/cache/
 cargo test --workspace -- --include-ignored    # core tests, incl. booting the official firmware
+cargo install --locked wasm-bindgen-cli --version 0.2.130
+scripts/build-wasm.sh                          # wasm core + JS bindings for web/ and runner/
 npm install && npm test                        # web tests
+npm run dev -w web                             # emulator at http://localhost:5173 (drop a .dfu on the page)
 npm run build                                  # static web build in web/dist
 ```
 

@@ -351,3 +351,42 @@ cargo run --release -p dryflash-core --example boot -- \
   --elf firmware/cache/official/flipper-z-f7-firmware-1.5.1.elf --cpu2-start 0x080D7000 --png screen.png
 cargo test --workspace --release -- --include-ignored
 ```
+
+### Checkpoint 2 — wasm bindings, Web Worker, web app
+
+- `core-wasm` (wasm-bindgen 0.2.130, pinned together with the CLI): `Emulator` with `load_dfu`,
+  `power_on`, `run`, `set_button`, `frame` (1 KiB, 1 bpp), `lights`, `take_log`,
+  `fidelity_json`, `crashes_json`, `digest_text`, `set_legacy_sleep`. `scripts/build-wasm.sh`
+  generates bindings for `web/` and `runner/` (git-ignored); CI builds them before the web job.
+- Worker (`web/src/emu/worker.ts`): slices of ≤ 12 ms wall time, steps of ≤ 5 ms virtual;
+  1× pacing locked to the wall clock with a 250 ms backlog cap (no catch-up bursts); Turbo runs
+  flat out. Frames are posted only when the display changed, as transferable buffers.
+- **Minimum press time (40 ms virtual).** A key tap whose press and release reach the worker
+  between two slices was invisible to the firmware: the input service debounces over
+  `INPUT_DEBOUNCE_TICKS` = 4 ms (furi_hal_resources.h). Releases are now held back until the
+  button has been down 40 ms of virtual time.
+- Web app: LCD canvas (backlight tint from the LP5562 white channel), on-screen keys and
+  keyboard (arrows, Enter/Space = OK, Backspace/Esc = Back), drag & drop or file picker for
+  `.dfu` (file stays in the browser), pause/resume, power cycle, Turbo, the Sleep-method
+  setting, firmware log, hardware fidelity table, positioning text and disclaimer; EN/IT.
+- Verified in a browser (built-in Chromium pane, dev server): official 1.5.1 boots to the
+  popup at 1× real time; Esc → Desktop, Enter → menu, ↓ ↓ → NFC, on-screen Back → Desktop;
+  Turbo ≈ 10× on the idle Desktop; no console errors; 375 px layout without horizontal scroll.
+- Production build: 349 KB wasm (123 KB gzip), 24 KB JS, 8 KB worker.
+
+### wasm speed (Node 23 / V8, Apple M5)
+
+| Workload | M0 | M2 | M3 CP2 |
+|---|---|---|---|
+| ADR-0001 CPU benchmark | 158 MIPS | ~138 MIPS | 137 MIPS |
+| Official 1.5.1, 10 s virtual (wasm, `core-wasm`) | — | — | 95 MIPS, 1.7 s wall (5.8× real time) |
+
+The benchmark has not returned to the M0 figure (peripheral dispatch and the M2 bus model sit on
+the hot path). It does not limit M3: the real firmware runs at 5.8× real time in V8. Kept open
+as a performance item rather than chased now.
+
+### IWDG
+
+Not enabled by firmware 1.5.1: no IWDG register is accessed in 60 s virtual from power-on (boot
+tool digest, Desktop idle); it stays register file only and is listed as such in the fidelity table. To be
+modelled when a firmware starts it.
