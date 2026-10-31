@@ -1,0 +1,14 @@
+{
+  "name": "@dryflash/proxy",
+  "private": true,
+  "version": "0.0.1",
+  "license": "GPL-3.0-or-later",
+  "description": "Cloudflare Worker serving web/dist as static assets (ADR-0003); the /proxy route arrives in M5",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.156.0"
+  }
+}

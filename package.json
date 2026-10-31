@@ -2,7 +2,11 @@
   "name": "dryflash-monorepo",
   "private": true,
   "license": "GPL-3.0-or-later",
-  "workspaces": ["web", "runner"],
+  "workspaces": [
+    "web",
+    "runner",
+    "proxy"
+  ],
   "scripts": {
     "build": "npm run build -w web",
     "test": "npm test -w web"

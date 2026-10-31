@@ -390,3 +390,16 @@ as a performance item rather than chased now.
 Not enabled by firmware 1.5.1: no IWDG register is accessed in 60 s virtual from power-on (boot
 tool digest, Desktop idle); it stays register file only and is listed as such in the fidelity table. To be
 modelled when a firmware starts it.
+
+### Checkpoint 3 — deployment prepared (not live yet)
+
+- `proxy/wrangler.jsonc`: Worker `app`, static assets from `web/dist`, `workers.dev` and preview
+  URLs on; wrangler 4.156.0 pinned in the `proxy` workspace.
+- `web/public/_headers`: CSP (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self'`, no
+  inline scripts or styles), `nosniff`, `no-referrer`, immutable caching for hashed assets; no
+  COOP/COEP.
+- Verified locally with `wrangler dev` (workerd): the page loads, the wasm core initialises under
+  the CSP (fidelity table filled from the core), headers present, `_headers` not served (404).
+- CI job `deploy` (after rust, cpu-fuzz, web, licences): `main` → `wrangler deploy`; pull requests
+  from this repository → preview version `pr-<n>`. Needs the repository secrets of
+  docs/DEPLOY.md; the preview URL is recorded here once live.
