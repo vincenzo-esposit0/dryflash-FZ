@@ -84,6 +84,16 @@ def gen(rng):
 
 
 def reg_value(rng):
+    """Random register value. Values pointing into the PPB are avoided: dryflash routes the
+    PPB to its System Control Space model while this Unicorn harness maps nothing there;
+    the PPB is covered by the exception conformance firmware (tests/exc-fw)."""
+    while True:
+        v = _reg_value(rng)
+        if not 0xDFFF0000 <= v < 0xE0110000:
+            return v
+
+
+def _reg_value(rng):
     k = rng.random()
     if k < 0.5:
         return RAM + 0x1000 + rng.randrange(0, 0xE000) & ~rng.choice([0, 1, 3])
@@ -169,6 +179,18 @@ def code_is_32(code):
     return code > 0xFFFF
 
 
+def unpredictable_modified_imm(code):
+    """Data processing (modified immediate) whose ThumbExpandImm is UNPREDICTABLE:
+    imm12<11:10> = 00, imm12<9:8> != 00 and imm8 = 0 (A5.3.2)."""
+    if code <= 0xFFFF:
+        return False
+    h1, h2 = code >> 16, code & 0xFFFF
+    if h1 & 0xFA00 != 0xF000 or h2 & 0x8000:
+        return False
+    imm12 = (h1 >> 10 & 1) << 11 | (h2 >> 12 & 7) << 8 | (h2 & 0xFF)
+    return imm12 >> 10 == 0 and (imm12 >> 8) & 3 != 0 and imm12 & 0xFF == 0
+
+
 def known_divergence(ours, ref, mnem):
     """Cases where dryflash follows the Cortex-M4 architecture and Unicorn (QEMU) is more
     permissive. Counted separately so they stay visible."""
@@ -199,7 +221,7 @@ def known_divergence(ours, ref, mnem):
         return "UNPREDICTABLE field values (lsb+width > 32, negative fraction bits)"
     if mnem.startswith("(capstone"):
         return "encoding Capstone rejects (SBZ/SBO violated): UNPREDICTABLE"
-    if ours.startswith("STOP Unimplemented") and m.endswith(".w") and "#0" in mnem:
+    if ours.startswith("STOP Unimplemented") and unpredictable_modified_imm(mnem_code[0]):
         return "UNPREDICTABLE ThumbExpandImm (replicated pattern with imm8 = 0)"
     if ours.startswith("OK") and ref[0] == "FAULT" and ("FETCH_UNMAPPED" in ref[1] or "EXCEPTION" in ref[1]):
         pc = int(ours.split()[16], 16)
