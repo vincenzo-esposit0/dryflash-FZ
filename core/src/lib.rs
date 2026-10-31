@@ -4,6 +4,7 @@
 //! The core is deterministic and free of host I/O: no clocks, no files, no threads.
 //! See `docs/ARCHITECTURE.md` §3.
 
+pub mod board;
 pub mod bus;
 pub mod cpu;
 pub mod loader;

@@ -190,3 +190,20 @@ python tests/cpu-fuzz/fuzz.py target/release/cpu-exec 20000 1
   HSEM is not modelled yet — next checkpoint (CPU2: HSEM, IPCC, shared SRAM2).
 - Speed: 153–160 MIPS native on the boot path (busy-wait delays dominate).
 - Nothing has been printed on USART1 yet at that point.
+
+### Checkpoint 3 (2026-10-31) — services running, CPU2 absent, stable
+
+- HSEM (1-step/2-step locks, free interrupts) and IPCC (CPU1 side of the mailboxes) modelled.
+  CPU2 is not emulated (ADR-0011): the firmware takes its own "C2 startup failed" path.
+- RNG: deterministic xorshift64* with a configurable seed (BRIEF §6 determinism).
+- LPTIM1/LPTIM2 with events on the virtual timeline: Furi's tickless idle (LPTIM1 on LSE)
+  sleeps in WFI and wakes on CMPM, so idle time is fast-forwarded.
+- Board devices on I2C1: BQ27220 fuel gauge (control subcommands, security keys, data memory
+  with checksum, CFG UPDATE; starts unprovisioned, so the firmware provisions it) and BQ25896
+  charger (register file). `furi_hal_power_init` no longer waits 12 s: `furi_hal_bt_init` is
+  reached at 2.4 s virtual (the remaining time is the gauge provisioning sequence).
+- Boot path: … → `furi_hal_bt_init` → `flipper_init` (services) → idle with periodic GUI
+  redraws (u8g2/canvas). 60 s virtual: no fault, no reset, no unmapped access; the CPU sleeps
+  ~90 % of the time; 60 s virtual run in 5.7 s wall (Apple M5, native).
+- Still register file only: PWR (pull-up/down control), SYSCFG, FLASH, DBGMCU, COMP, USB,
+  TIM1, TIM17. Nothing has been printed on USART1 yet.

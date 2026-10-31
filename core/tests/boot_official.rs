@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The pinned official `.dfu` boots from the reset vector through `SystemInit`, `main`, the
-//! FreeRTOS scheduler start and into `furi_hal_init` in the first task, without hitting an
-//! emulator gap in the CPU (M1 definition of done, extended in M2).
+//! FreeRTOS scheduler start, `furi_hal_init` and `flipper_init`, then runs services for 10 s
+//! without faults or resets (M1 definition of done, extended in M2).
 //!
 //! Needs the pinned firmware: `node scripts/fetch-firmware.mjs official --elf`.
 //! Run with `cargo test -p dryflash-core --release -- --include-ignored`.
@@ -28,11 +28,13 @@ const PATH: &[&str] = &[
     "furi_hal_clock_init",
     "furi_hal_interrupt_init",
     "furi_hal_power_init",
+    "furi_hal_bt_init",
+    "flipper_init",
 ];
 
 #[test]
 #[ignore = "needs firmware/cache/official (scripts/fetch-firmware.mjs official --elf)"]
-fn official_1_5_1_boot_path_reaches_the_scheduler_and_hal_init() {
+fn official_1_5_1_boots_to_services_and_keeps_running() {
     let dfu_file = std::fs::read(format!("{DIR}/f7-update-1.5.1/firmware.dfu")).expect("fetch the firmware first");
     let elf = std::fs::read(format!("{DIR}/flipper-z-f7-firmware-1.5.1.elf")).expect("fetch the ELF first");
     let syms = Symbols::from_elf(&elf).unwrap();
@@ -51,7 +53,7 @@ fn official_1_5_1_boot_path_reaches_the_scheduler_and_hal_init() {
     while reached.len() < PATH.len() {
         match m.run(1_000_000) {
             RunExit::Stopped(Stop::Watch { pc }) => reached.push(pc),
-            RunExit::Budget if m.cpu.cycles < 50_000_000 => {}
+            RunExit::Budget if m.cpu.cycles < 640_000_000 => {}
             other => panic!(
                 "stopped after {reached:x?} with {other:?} at {:?}",
                 syms.lookup(m.cpu.pc())
@@ -60,9 +62,18 @@ fn official_1_5_1_boot_path_reaches_the_scheduler_and_hal_init() {
     }
     assert_eq!(reached, addrs, "boot path order");
 
-    // 1 M further cycles: no unimplemented encoding, lockup, unmapped access or reset.
+    // 10 s of virtual time with services running: no unimplemented encoding, lockup, fault,
+    // unmapped access or reset (CPU2 absent: the firmware takes its "C2 startup failed" path).
     m.cpu.watch.clear();
-    let exit = m.run(1_000_000);
+    let exit = m.run(640_000_000);
+    assert!(
+        !m.digest()
+            .events
+            .iter()
+            .any(|e| e.what.contains("fault") || e.what.contains("HardFault")),
+        "fault events: {:?}",
+        m.digest().events
+    );
     assert!(
         matches!(exit, RunExit::Budget),
         "unexpected stop {exit:?} at {:?}",

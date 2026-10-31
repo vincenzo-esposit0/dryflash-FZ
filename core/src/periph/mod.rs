@@ -8,10 +8,14 @@
 
 pub mod exti;
 pub mod gpio;
+pub mod hsem;
 pub mod i2c;
+pub mod ipcc;
 pub mod irq;
+pub mod lptim;
 pub mod rcc;
 pub mod regfile;
+pub mod rng;
 pub mod rtc;
 pub mod spi;
 #[rustfmt::skip]
@@ -72,6 +76,10 @@ enum Slot {
     Spi(usize),
     Usart(usize),
     Rtc,
+    Hsem,
+    Ipcc,
+    Rng,
+    Lptim(usize),
     Generic(usize),
 }
 
@@ -87,6 +95,11 @@ pub struct Periphs {
     /// USART1 (Furi log / CLI), LPUART1.
     pub usart: Vec<usart::Usart>,
     pub rtc: rtc::Rtc,
+    pub hsem: hsem::Hsem,
+    pub ipcc: ipcc::Ipcc,
+    pub rng: rng::Rng,
+    /// LPTIM1 (Furi's tickless idle timer), LPTIM2.
+    pub lptim: Vec<lptim::Lptim>,
     /// Register-file-only peripherals.
     pub generic: Vec<RegFile>,
     /// (base, end, slot), sorted by base.
@@ -114,6 +127,7 @@ impl Periphs {
         descs.sort_by_key(|d| d.base);
         let (mut gpio, mut i2c, mut spi, mut usart, mut generic) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut lptim = Vec::new();
         let mut map = Vec::new();
         for (i, d) in descs.iter().enumerate() {
             // A block extends to the next block or its last register, within the 1 KiB stride.
@@ -140,6 +154,13 @@ impl Periphs {
                     Slot::Usart(usart.len() - 1)
                 }
                 "RTC" => Slot::Rtc,
+                "HSEM" => Slot::Hsem,
+                "IPCC" => Slot::Ipcc,
+                "RNG" => Slot::Rng,
+                "LPTIM1" | "LPTIM2" => {
+                    lptim.push(lptim::Lptim::new(d));
+                    Slot::Lptim(lptim.len() - 1)
+                }
                 _ => {
                     generic.push(RegFile::new(d));
                     Slot::Generic(generic.len() - 1)
@@ -147,6 +168,9 @@ impl Periphs {
             };
             map.push((d.base, end, slot));
         }
+        // Board wiring (targets/f7/furi_hal/furi_hal_i2c_config.c): I2C1 is the power bus.
+        i2c[0].devices.push(Box::new(crate::board::bq27220::Bq27220::new()));
+        i2c[0].devices.push(Box::new(crate::board::bq25896::Bq25896::new()));
         let rcc = rcc::Rcc::new();
         let clocks = rcc.clocks();
         Periphs {
@@ -157,6 +181,10 @@ impl Periphs {
             spi,
             usart,
             rtc: rtc::Rtc::new(),
+            hsem: hsem::Hsem::new(),
+            ipcc: ipcc::Ipcc::new(),
+            rng: rng::Rng::new(rng::DEFAULT_SEED),
+            lptim,
             generic,
             map,
             clocks,
@@ -189,6 +217,10 @@ impl Periphs {
         self.tb_cycles = now;
         self.rcc.reset(kind);
         self.usart.iter_mut().for_each(|u| u.reset());
+        self.hsem.reset();
+        self.ipcc.reset();
+        self.rng.reset();
+        self.lptim.iter_mut().for_each(|l| l.reset());
         if kind == ResetKind::PowerOn {
             // The RTC is in the backup domain: only power-on (or BDRST) resets it.
             self.rtc.reset(ns);
@@ -203,9 +235,39 @@ impl Periphs {
     }
 
     /// Runs peripheral events that are due and recomputes `next_event`.
-    pub fn advance(&mut self, _ctx: &mut Ctx) {
-        self.next_event = None;
+    pub fn advance(&mut self, ctx: &mut Ctx) {
+        let ns = self.now_ns(ctx.now);
+        for l in &mut self.lptim {
+            l.advance(ns);
+        }
         self.update_irqs();
+        self.schedule();
+    }
+
+    /// CPU cycle at which virtual time reaches `ns` (rounded up).
+    fn cycles_at(&self, ns: u128) -> u64 {
+        let hz = self.clocks.hclk1.max(1) as u128;
+        let d = ns.saturating_sub(self.tb_ns);
+        self.tb_cycles + (d * hz).div_ceil(1_000_000_000) as u64
+    }
+
+    /// Recomputes the earliest peripheral event.
+    fn schedule(&mut self) {
+        let ns = self.lptim.iter().filter_map(|l| l.next_event_ns()).min();
+        self.next_event = ns.map(|n| self.cycles_at(n));
+    }
+
+    /// LPTIM kernel clocks from RCC_CCIPR.LPTIMxSEL: PCLK1, LSI, HSI16, LSE (RM0434 RCC).
+    fn lptim_clocks(&mut self) {
+        let ccipr = self.rcc.regs.get(rcc::CCIPR);
+        for (i, shift) in [(0usize, 18u32), (1, 20)] {
+            self.lptim[i].clock_hz = match (ccipr >> shift) & 3 {
+                0 => self.clocks.pclk1,
+                1 => 32_000,
+                2 => 16_000_000,
+                _ => 32_768,
+            };
+        }
     }
 
     fn update_irqs(&mut self) {
@@ -215,6 +277,21 @@ impl Periphs {
         }
         if self.usart[1].irq() {
             lines |= 1 << irq::LPUART1;
+        }
+        if self.hsem.irq() {
+            lines |= 1 << irq::HSEM;
+        }
+        if self.ipcc.irq_rx() {
+            lines |= 1 << irq::IPCC_C1_RX;
+        }
+        if self.ipcc.irq_tx() {
+            lines |= 1 << irq::IPCC_C1_TX;
+        }
+        if self.lptim[0].irq() {
+            lines |= 1 << irq::LPTIM1;
+        }
+        if self.lptim[1].irq() {
+            lines |= 1 << irq::LPTIM2;
         }
         if lines != self.irq_lines {
             self.irq_lines = lines;
@@ -238,6 +315,10 @@ impl Periphs {
             Slot::Spi(i) => &self.spi[i].regs,
             Slot::Usart(i) => &self.usart[i].regs,
             Slot::Rtc => &self.rtc.regs,
+            Slot::Hsem => &self.hsem.regs,
+            Slot::Ipcc => &self.ipcc.regs,
+            Slot::Rng => &self.rng.regs,
+            Slot::Lptim(i) => &self.lptim[i].regs,
             Slot::Generic(i) => &self.generic[i],
         }
     }
@@ -264,6 +345,15 @@ impl Periphs {
             Slot::Rtc => {
                 let ns = self.now_ns(ctx.now);
                 self.rtc.read(word_off, ns)
+            }
+            Slot::Hsem => self.hsem.read(word_off),
+            Slot::Ipcc => self.ipcc.regs.read(word_off),
+            Slot::Rng => self.rng.read(word_off),
+            Slot::Lptim(i) => {
+                let ns = self.now_ns(ctx.now);
+                let v = self.lptim[i].read(word_off, ns);
+                self.update_irqs();
+                v
             }
             // SPI DR reads pop frames from the FIFO: the access size matters.
             Slot::Spi(i) => return Some(self.spi[i].read(off, size).unwrap_or(0)),
@@ -315,6 +405,16 @@ impl Periphs {
                 let h = self.rcc.write(word_off, value, ctx, addr);
                 let clocks = self.rcc.clocks();
                 self.retime(ctx.now, clocks);
+                // Peripheral resets held through RCC_APBxRSTRx (furi_hal_bus_reset).
+                if self.rcc.regs.get(rcc::APB1RSTR1) & (1 << 31) != 0 {
+                    self.lptim[0].reset();
+                }
+                if self.rcc.regs.get(rcc::APB1RSTR2) & (1 << 5) != 0 {
+                    self.lptim[1].reset();
+                }
+                self.lptim_clocks();
+                self.update_irqs();
+                self.schedule();
                 if self.rcc.backup_domain_reset_requested() {
                     let ns = self.now_ns(ctx.now);
                     self.rtc.reset(ns);
@@ -329,6 +429,25 @@ impl Periphs {
             Slot::Rtc => {
                 let ns = self.now_ns(ctx.now);
                 self.rtc.write(word_off, value, ns)
+            }
+            Slot::Hsem => {
+                let h = self.hsem.write(word_off, value);
+                self.update_irqs();
+                h
+            }
+            Slot::Ipcc => {
+                let h = self.ipcc.write(word_off, value);
+                self.update_irqs();
+                h
+            }
+            Slot::Rng => self.rng.write(word_off, value),
+            Slot::Lptim(i) => {
+                let ns = self.now_ns(ctx.now);
+                self.lptim_clocks();
+                let h = self.lptim[i].write(word_off, value, ns);
+                self.update_irqs();
+                self.schedule();
+                h
             }
             Slot::Gpio(i) => self.gpio[i].write(word_off, value),
             Slot::Exti => {
@@ -378,6 +497,27 @@ impl Periphs {
                 "RTC",
                 Partial,
                 "calendar, init mode, write protection, backup registers; no alarms/wakeup",
+            ),
+            (
+                "RNG",
+                Partial,
+                "deterministic xorshift64* with a configurable seed, never errors",
+            ),
+            (
+                "LPTIM1/LPTIM2",
+                Partial,
+                "internal clock, one-shot/continuous, CMP/ARR events; no triggers/outputs",
+            ),
+            ("HSEM", Emulated, "1-step/2-step locks, free interrupts (CPU1 side)"),
+            (
+                "IPCC",
+                Partial,
+                "CPU1 side of the mailboxes; CPU2 never answers (ADR-0011)",
+            ),
+            (
+                "CPU2 (radio core)",
+                Stubbed,
+                "not emulated: firmware takes its 'C2 startup failed' path, no Bluetooth",
             ),
         ];
         for g in &self.generic {

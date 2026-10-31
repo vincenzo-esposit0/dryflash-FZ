@@ -29,6 +29,9 @@ const BDCR: u32 = svd::RCC.offset_of("BDCR");
 const CSR: u32 = svd::RCC.offset_of("CSR");
 const CRRCR: u32 = svd::RCC.offset_of("CRRCR");
 const EXTCFGR: u32 = svd::RCC.offset_of("EXTCFGR");
+pub const CCIPR: u32 = svd::RCC.offset_of("CCIPR");
+pub const APB1RSTR1: u32 = svd::RCC.offset_of("APB1RSTR1");
+pub const APB1RSTR2: u32 = svd::RCC.offset_of("APB1RSTR2");
 
 /// (enable bit, ready bit) pairs in CR.
 const CR_READY: &[(u32, u32)] = &[(0, 1), (8, 10), (9, 12), (16, 17), (24, 25), (26, 27)];
