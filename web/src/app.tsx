@@ -12,10 +12,13 @@ import type {
   ToWorker,
 } from "./emu/protocol";
 import { detectLocale, t, type Key } from "./i18n";
+import { LINK_DEVICE, fetchFirmware, linkMustAsk, parseLink, type LinkParams } from "./emu/remote";
 import { stripAnsi } from "./ui/ansi";
 import { download, formatSize, joinPath, parentPath } from "./ui/download";
 import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
+import { Fidelity } from "./pages";
+import { SiteFooter, SiteHeader } from "./ui/chrome";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
 const locale = detectLocale(navigator.languages ?? [navigator.language]);
@@ -433,7 +436,8 @@ function CardFiles({
   );
 }
 
-export function App() {
+/** The main site, or (`embed`) just the device, for an iframe with the API of docs/EMBED.md. */
+export function App({ embed = false }: { embed?: boolean }) {
   const worker = useRef<Worker | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -472,10 +476,38 @@ export function App() {
   const [ghosting, setGhosting] = useState(false);
   const [recording, setRecording] = useState<"webm" | "gif" | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
+  const [fetching, setFetching] = useState<string | null>(null);
+  const [provenance, setProvenance] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
   const send: Send = (m, transfer = []) => worker.current?.postMessage(m, transfer);
+  const toParent = (m: Record<string, unknown>, transfer: Transferable[] = []) => {
+    if (embed) window.parent.postMessage({ source: "dryflash", ...m }, "*", transfer);
+  };
+  const framesOut = useRef<{ on: boolean; last: number }>({ on: false, last: 0 });
+  const started = useRef(false);
+
+  /** Downloads a firmware and hands it to the emulator. */
+  const loadFromUrl = async (link: Pick<LinkParams, "fw" | "elf" | "ota">, deviceLabel?: string) => {
+    try {
+      const f = await fetchFirmware(link.fw, location.href, (done, total) => {
+        const percent = total ? `${Math.round((done * 100) / total)}%` : formatSize(done);
+        setFetching(tr("downloading").replace("{name}", link.fw.split("/").pop() ?? "").replace("{percent}", percent));
+      });
+      setFetching(null);
+      setProvenance(tr(f.viaProxy ? "viaProxy" : "direct").replace("{name}", f.name).replace("{url}", link.fw));
+      send({ type: "load", name: f.name, bytes: f.bytes, ota: link.ota, deviceLabel }, [f.bytes]);
+      if (link.elf) {
+        const e = await fetchFirmware(link.elf, location.href);
+        send({ type: "symbols", bytes: e.bytes }, [e.bytes]);
+      }
+    } catch (err) {
+      setFetching(null);
+      setError(String(err instanceof Error ? err.message : err));
+      toParent({ type: "error", message: String(err) });
+    }
+  };
 
   const drawCapture = () => {
     const c = captureCanvas.current;
@@ -542,6 +574,10 @@ export function App() {
         case "ready":
           setFidelity(m.fidelity);
           setReady(true);
+          toParent({ type: "ready", version: m.version });
+          break;
+        case "milestone":
+          toParent({ type: m.name });
           break;
         case "devices":
           setDevices(m.devices);
@@ -565,6 +601,7 @@ export function App() {
           break;
         case "crashes":
           setCrashes(m.crashes);
+          if (m.crashes.length) toParent({ type: "crashed", summary: m.crashes[m.crashes.length - 1].message });
           break;
         case "loaded":
           setFirmware(m.name);
@@ -587,6 +624,11 @@ export function App() {
         case "frame":
           bits.current = new Uint8Array(m.bits);
           onFrame();
+          if (framesOut.current.on && performance.now() - framesOut.current.last >= 200) {
+            framesOut.current.last = performance.now();
+            const copy = bits.current.slice().buffer;
+            toParent({ type: "frame", bits: copy }, [copy]);
+          }
           break;
         case "lights":
           backlight.current = m.rgbw[3];
@@ -613,13 +655,16 @@ export function App() {
           break;
         case "stopped":
           setStop({ reason: m.reason, crashes: m.crashes, digest: m.digest });
+          toParent({ type: "crashed", summary: m.crashes[m.crashes.length - 1]?.message ?? m.reason });
           break;
         case "error":
           setError(m.message);
+          toParent({ type: "error", message: m.message });
           break;
       }
     };
     redraw();
+    w.postMessage({ type: "init", ephemeral: embed } satisfies ToWorker);
     // Development only: `?fw=/@fs/<absolute path>` loads a local firmware file through Vite.
     const fw = import.meta.env.DEV ? new URLSearchParams(location.search).get("fw") : null;
     if (fw) {
@@ -653,6 +698,64 @@ export function App() {
       document.removeEventListener("visibilitychange", onHide);
       w.terminate();
     };
+  }, []);
+
+  // A link's firmware: once, when the device list is known.
+  useEffect(() => {
+    if (!ready || !active || started.current) return;
+    started.current = true;
+    const dev = import.meta.env.DEV && new URLSearchParams(location.search).get("fw")?.startsWith("/@fs/");
+    const link = dev ? null : parseLink(location.search);
+    if (!link) return;
+    framesOut.current.on = link.frames;
+    if (embed) {
+      void loadFromUrl(link);
+      return;
+    }
+    const label = link.device ?? LINK_DEVICE;
+    const target = devices.find((d) => d.label === label);
+    const go = () => void loadFromUrl(link, label);
+    if (!linkMustAsk(link, target ? { hasFirmware: !!target.firmware } : null)) go();
+    else {
+      setQuestion({
+        message: `${tr("linkAsk")} ${link.fw} — ${tr("linkDevice").replace("{device}", label)}`,
+        action: tr("load"),
+        onAnswer: go,
+      });
+    }
+  }, [ready, active]);
+
+  // Commands from the page around an embed frame, and only from it (docs/EMBED.md).
+  useEffect(() => {
+    if (!embed) return;
+    const onCommand = (ev: MessageEvent) => {
+      if (ev.source !== window.parent) return;
+      const m = ev.data as { type?: string; url?: string; bytes?: ArrayBuffer; name?: string; button?: ButtonName; down?: boolean };
+      switch (m?.type) {
+        case "load":
+          if (m.url) void loadFromUrl({ fw: m.url, elf: null, ota: false });
+          else if (m.bytes) send({ type: "load", name: m.name ?? "firmware", bytes: m.bytes }, [m.bytes]);
+          break;
+        case "press":
+          if (m.button) {
+            if (m.down === undefined) {
+              send({ type: "button", button: m.button, down: true });
+              send({ type: "button", button: m.button, down: false });
+            } else send({ type: "button", button: m.button, down: m.down });
+          }
+          break;
+        case "reset":
+          send({ type: "control", action: "reset" });
+          break;
+        case "screenshot":
+          ensureCapture().toBlob((blob) => {
+            void blob?.arrayBuffer().then((png) => toParent({ type: "screenshot", png }, [png]));
+          }, "image/png");
+          break;
+      }
+    };
+    window.addEventListener("message", onCommand);
+    return () => window.removeEventListener("message", onCommand);
   }, []);
 
   // The panel is always a whole multiple of its 128×64 pixels.
@@ -814,15 +917,9 @@ export function App() {
       onDrop={onDrop}
       class={dragging ? "dragging" : ""}
     >
-      <header>
-        <h1>dryflash</h1>
-        <p class="tagline">{tr("tagline")}</p>
-        <p class="status" role="status">
-          {tr("status")}
-        </p>
-      </header>
+      {!embed && <SiteHeader />}
 
-      <div class="layout">
+      <div class={embed ? "layout embed" : "layout"}>
         <section class="stage" ref={stage} aria-label={tr("device")}>
           <div class="device" ref={deviceBox}>
             <Shell />
@@ -840,7 +937,9 @@ export function App() {
             </div>
             <Keys pressed={pressed} press={press} enabled={hasFirmware} />
           </div>
-          <div class="toolbar">
+          {fetching && <p class="meter" role="status">{fetching}</p>}
+          {embed && error && <p class="error" role="alert">{error}</p>}
+          {!embed && <div class="toolbar">
             <button type="button" disabled={!hasFirmware} onClick={() => send({ type: "control", action: "reset" })}>
               {tr("reset")}
             </button>
@@ -883,7 +982,7 @@ export function App() {
               />{" "}
               {tr("ghosting")}
             </label>
-          </div>
+          </div>}
           {recording && (
             <p class="hint rec" role="status">
               {tr("recording")}
@@ -895,10 +994,10 @@ export function App() {
               {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
             </p>
           )}
-          <p class="hint">{tr("keyboard")}</p>
+          {!embed && <p class="hint">{tr("keyboard")}</p>}
         </section>
 
-        <div class="panels">
+        {!embed && <div class="panels">
           <Panel title={tr("firmwarePanel")} open>
             <label class="drop">
               <span>{ready ? tr("drop") : tr("starting")}</span>
@@ -914,6 +1013,7 @@ export function App() {
               <span class="choose">{tr("choose")}</span>
             </label>
             <p class="hint">{tr("privacy")}</p>
+            {provenance && <p class="hint">{provenance}</p>}
             {installed && <p class="hint">{installed}</p>}
             <label>
               <input
@@ -990,37 +1090,14 @@ export function App() {
           </Panel>
 
           <Panel title={tr("fidelity")}>
-            <div class="table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{tr("component")}</th>
-                    <th>{tr("level")}</th>
-                    <th>{tr("note")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fidelity.map((r) => (
-                    <tr>
-                      <td>{r.name}</td>
-                      <td class={`lvl ${r.level}`}>{tr(`lvl_${r.level}` as Key)}</td>
-                      <td>{r.note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Fidelity rows={fidelity} />
           </Panel>
-        </div>
+        </div>}
       </div>
 
       <AskDialog question={question} close={() => setQuestion(null)} />
 
-      <footer>
-        <p>{tr("positioning")}</p>
-        <p>{tr("disclaimer")}</p>
-        <a href="https://github.com/vincenzo-esposit0/dryflash-FZ">{tr("source")}</a>
-      </footer>
+      {!embed && <SiteFooter />}
     </main>
   );
 }

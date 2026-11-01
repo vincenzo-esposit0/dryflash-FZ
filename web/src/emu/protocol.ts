@@ -29,8 +29,12 @@ export interface CrashRecord {
 }
 
 export type ToWorker =
+  /** First message. `ephemeral`: keep nothing and touch no saved device (the embed page). */
+  | { type: "init"; ephemeral: boolean }
+  | { type: "symbols"; bytes: ArrayBuffer }
   /** `ota`: hand an update package to the running firmware's updater instead of a quick install. */
-  | { type: "load"; name: string; bytes: ArrayBuffer; ota?: boolean }
+  /** `deviceLabel`: switch to the device with this name first, creating it if needed. */
+  | { type: "load"; name: string; bytes: ArrayBuffer; ota?: boolean; deviceLabel?: string }
   | { type: "eraseCard" }
   | { type: "flush" }
   | { type: "button"; button: ButtonName; down: boolean }
@@ -89,6 +93,8 @@ export type FromWorker =
   | { type: "loaded"; name: string; packageInfo?: { info: string; files: number } }
   | { type: "otaStarted"; name: string; info: string }
   | { type: "error"; message: string }
+  /** From the firmware's log (docs/EMBED.md). */
+  | { type: "milestone"; name: "booted" | "desktopReached" }
   | { type: "frame"; bits: ArrayBuffer }
   | { type: "lights"; rgbw: [number, number, number, number] }
   | { type: "log"; bytes: ArrayBuffer }

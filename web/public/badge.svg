@@ -1,0 +1,11 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<svg xmlns="http://www.w3.org/2000/svg" width="136" height="20" role="img" aria-label="Try in browser: dryflash">
+  <title>Try in browser: dryflash</title>
+  <rect width="136" height="20" rx="3" fill="#191a1c"/>
+  <rect x="84" width="52" height="20" rx="3" fill="#ff8a1f"/>
+  <rect x="84" width="4" height="20" fill="#ff8a1f"/>
+  <g font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11" text-anchor="middle">
+    <text x="43" y="14" fill="#e6e6e6">Try in browser</text>
+    <text x="110" y="14" fill="#000">dryflash</text>
+  </g>
+</svg>

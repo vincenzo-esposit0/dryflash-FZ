@@ -1,0 +1,10 @@
+{
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later. What has actually been observed for each pinned firmware, by hand at the end of M4 (docs/BRINGUP_LOG.md). The nightly CI of M6 replaces this file. Values: true = seen working, null = not tested.",
+  "checked": "2026-11-01",
+  "results": {
+    "official": { "boots": true, "desktop": true, "apps": true, "ota": true },
+    "momentum": { "boots": true, "desktop": true, "apps": null, "ota": null },
+    "unleashed": { "boots": true, "desktop": true, "apps": null, "ota": null },
+    "roguemaster": { "boots": true, "desktop": true, "apps": null, "ota": null }
+  }
+}

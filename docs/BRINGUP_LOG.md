@@ -595,3 +595,29 @@ once not tested; wasm CPU benchmark still below its M0 figure.
 - **Not done or not tested:** fullscreen and ghosting were only exercised without looking at the result;
   bottom sheets on mobile (panels collapse instead); Mute (no audio before M7); Reboot to DFU (not
   modelled); Gamepad API (stretch). Firefox and WebKit come with the E2E suite in checkpoint 4.
+
+### Checkpoint 3 — links, proxy, pages, embed
+
+- `proxy/src`: `GET /proxy/fetch?url=` (ADR-0002). Only release assets of the three repositories without
+  CORS; each redirect checked, up to GitHub's asset hosts; 64 MiB; one day of edge cache; about 30
+  requests a minute per client (per isolate: a rough limit, no binding needed); only dryflash sites from a
+  browser. Everything else runs no code: `run_worker_first` covers `/proxy/*` alone.
+- Links (`docs/EMBED.md`): `fw`, `elf`, `mode`, `autoboot`, `device`. **A link cannot overwrite a visitor's
+  device by surprise:** its firmware goes on a device called "From a link", and naming a device that has a
+  firmware always asks. Without `autoboot` it asks too. The page says where the file came from and whether
+  through the proxy. `connect-src` now allows https for this.
+- `/embed`: only the device, frameable by anyone (its own CSP; the other pages stay `frame-ancestors
+  'self'`), keeps nothing and cannot reach saved devices. API in `docs/EMBED.md`: `ready`, `booted`,
+  `desktopReached`, `crashed`, `frame`, `screenshot`, `error` out; `load`, `press`, `reset`, `screenshot` in,
+  accepted only from the parent window. `booted` and `desktopReached` read the firmware's log, which is
+  provisional until the M6 decision.
+- `/compat`: the pinned firmwares with what was seen working, from `firmware/compat-results.json`, written
+  by hand and saying so; the M6 nightly replaces it. `/about`: how it works, limits, fidelity table from the
+  core, credits. "Try in browser" badge: `web/public/badge.svg`.
+- Verified on the real Worker with `wrangler dev`: proxy download identical to the pinned package (same
+  SHA-256); wrong host and origin 403, other route 404; `/embed` and only `/embed` frameable; link with
+  `autoboot` loads Unleashed through the proxy onto "From a link" and leaves "Device 1" alone; without it, the
+  question appears; `/compat`, `/about`. Embed in a real iframe: milestones, tap, `frame`, screenshot, reset.
+- Expected noise: when a host has no CORS the browser logs the failed direct attempt before the proxy works.
+- **Not tested:** the proxy deployed on Cloudflare (edge cache, rate limit, `CF-Connecting-IP`); `elf` and
+  `mode=ota` through a link; embedding from another origin (the test frame was same-origin).

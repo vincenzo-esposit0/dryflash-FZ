@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// One Worker for the whole product (ADR-0003). M3: static assets only (web/dist); the
-// allowlisted /proxy route (ADR-0002) is added in M5 with `main` and `run_worker_first`.
+// One Worker for the whole product (ADR-0003): static assets (web/dist), and code only for /proxy/*
+// (ADR-0002). Other paths fall back to the app, which routes /embed, /compat and /about itself.
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "app",
+  "main": "src/index.ts",
   "compatibility_date": "2026-10-29",
   "workers_dev": true,
   "preview_urls": true,
   "assets": {
-    "directory": "../web/dist"
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/proxy/*"],
+    "not_found_handling": "single-page-application"
   }
 }

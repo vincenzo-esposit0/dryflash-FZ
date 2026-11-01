@@ -11,6 +11,7 @@ use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
 use dryflash_core::board::{Battery, Button};
 use dryflash_core::bus::Fidelity;
 use dryflash_core::loader::dfu;
+use dryflash_core::loader::elf::Symbols;
 use dryflash_core::loader::package::{Package, install_resources, stage_ota};
 use dryflash_core::machine::{Machine, RunExit};
 use wasm_bindgen::prelude::*;
@@ -31,6 +32,12 @@ pub fn version() -> String {
     VERSION.to_string()
 }
 
+/// The hardware fidelity table, for pages with no emulator running.
+#[wasm_bindgen]
+pub fn fidelity_table() -> String {
+    Emulator::new().fidelity_json()
+}
+
 /// Why `Emulator::run` returned, as a small integer for the worker.
 #[wasm_bindgen]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +53,8 @@ pub struct Emulator {
     m: Machine,
     /// A firmware is in flash.
     loaded: bool,
+    /// Function names from the firmware's ELF, for the digest.
+    symbols: Option<Symbols>,
     /// Virtual-device settings, applied to each new machine.
     board: BoardInfo,
     uid64: u64,
@@ -117,6 +126,7 @@ impl Emulator {
         Emulator {
             m: Machine::new(),
             loaded: false,
+            symbols: None,
             board: BoardInfo::default(),
             uid64: 0,
             battery: Battery::default(),
@@ -356,6 +366,12 @@ impl Emulator {
         self.m.bus.flash_writes as f64
     }
 
+    /// Function names from the firmware's ELF, used by `digest_text`.
+    pub fn load_symbols(&mut self, elf: &[u8]) -> Result<(), String> {
+        self.symbols = Some(Symbols::from_elf(elf).map_err(|e| format!("not a readable ELF: {e}"))?);
+        Ok(())
+    }
+
     /// Virtual-device setting Sleep Method = Legacy (ADR-0012); applies at the next power-on.
     pub fn set_legacy_sleep(&mut self, on: bool) {
         self.m.bus.legacy_sleep = on;
@@ -510,7 +526,10 @@ impl Emulator {
 
     /// Bring-up digest (unimplemented/latched registers, events) as text.
     pub fn digest_text(&self) -> String {
-        self.m.digest().render(&|_| None, 12)
+        let symbols = &self.symbols;
+        self.m
+            .digest()
+            .render(&|pc| symbols.as_ref().and_then(|s| s.lookup(pc)), 12)
     }
 }
 
