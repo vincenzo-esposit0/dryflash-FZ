@@ -10,6 +10,9 @@ pub const PORT_H: usize = 5;
 /// Display wiring (furi_hal_resources.h): CS = PC11, DI/A0 = PB1, RST = PB0.
 pub const DISPLAY_CS: (usize, u8) = (PORT_C, 11);
 pub const DISPLAY_A0: (usize, u8) = (PORT_B, 1);
+/// microSD chip select and card detect (furi_hal_resources.h: SD_CS PC12, SD_CD PC10).
+pub const SD_CS: (usize, u8) = (PORT_C, 12);
+pub const SD_CD: (usize, u8) = (PORT_C, 10);
 pub const DISPLAY_RST: (usize, u8) = (PORT_B, 0);
 
 /// The six buttons (furi_hal_resources.c `input_pins`).
@@ -49,8 +52,10 @@ impl Button {
 
 pub mod bq25896;
 pub mod bq27220;
+pub mod fat32;
 pub mod lp5562;
 pub mod otp;
+pub mod sdcard;
 pub mod st7567;
 
 /// Battery state shown by the fuel gauge and charger (UI controls in M7).

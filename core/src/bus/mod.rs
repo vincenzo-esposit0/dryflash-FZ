@@ -6,6 +6,7 @@
 //! bring-up digest (QEMU-style "unimplemented device" semantics — never a fake value).
 
 pub mod cpu2;
+pub mod dma;
 pub mod map;
 
 use crate::cpu::{Bus, BusError, Size};
@@ -209,6 +210,9 @@ impl Bus for SystemBus {
             pc: self.access_pc,
         };
         if self.periphs.write(addr, value, size, &mut ctx) {
+            if dma::concerns_dma(addr) {
+                self.dma_service();
+            }
             if addr == cpu2::PWR_CR4 || addr.wrapping_sub(crate::periph::svd::IPCC.base) < 0x400 {
                 self.cpu2_service();
             }
