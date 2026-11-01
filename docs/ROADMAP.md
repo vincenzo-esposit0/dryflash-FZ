@@ -64,11 +64,11 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 
 ## M4 — SD card + `.tgz`
 
-- ☐ FLASH controller: unlock, program, page erase, option bytes (moved from M2)
+- ☑ FLASH controller: unlock, program, page erase, option bytes (moved from M2)
 - ☑ SD SPI protocol, FAT32 card (ADR-0013), saved in the browser (OPFS, IndexedDB fallback)
 - ☑ `.tgz` + `update.fuf`; resources as `resources.ths` (heatshrink + tar) or `resources.tar.gz`, unpacked to `/ext`, also from the web app
 - ☑ Apps (`.fap`) launch from SD
-- ☐ Real OTA install mode via the firmware's own updater (RAM execution, option bytes)
+- ☑ Real OTA install mode via the firmware's own updater (RAM execution, option bytes); radio stack left out (ADR-0014, proposed)
 
 **DoD:** official `.tgz` quick-installs and runs apps from SD; Real OTA install succeeds on the official firmware.
 

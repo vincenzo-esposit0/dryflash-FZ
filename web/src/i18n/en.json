@@ -47,5 +47,8 @@
   "persist_indexeddb": "Saved in this browser (IndexedDB).",
   "persist_none": "Not saved: it is lost when you close this page. Another tab may have the card open, or this browser blocks storage.",
   "eraseCard": "Erase card",
-  "eraseConfirm": "Erase the whole virtual SD card? Everything on it is lost, including the device's saved settings. The device restarts."
+  "eraseConfirm": "Erase the whole virtual SD card? Everything on it is lost, including the device's saved settings. The device restarts.",
+  "otaMode": "Install packages with the firmware's own updater (Real OTA)",
+  "otaNote": "Needs a firmware already running here. The device restarts into its updater, which backs up, programs flash, checks it and unpacks the resources itself; this takes about a minute. Only the radio stack is left out: this emulator has no radio core to install it on (ADR-0014).",
+  "otaStarted": "Real OTA of {name} ({info}) started: follow it on the screen."
 }

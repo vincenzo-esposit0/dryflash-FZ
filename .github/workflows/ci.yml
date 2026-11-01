@@ -30,10 +30,14 @@ jobs:
       - name: Cache pinned firmware (fetched from the original host, hash-checked)
         uses: actions/cache@v6
         with:
-          path: firmware/cache/official
+          path: |
+            firmware/cache/official
+            firmware/cache/unleashed
           key: fw-official-${{ hashFiles('firmware/compat.json') }}
-      - name: Fetch pinned official firmware
-        run: node scripts/fetch-firmware.mjs official --elf
+      - name: Fetch pinned firmwares (official; unleashed for the OTA test)
+        run: |
+          node scripts/fetch-firmware.mjs official --elf
+          node scripts/fetch-firmware.mjs unleashed
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
       - name: Tests (including those that need the pinned firmware)
         run: cargo test --workspace --release -- --include-ignored

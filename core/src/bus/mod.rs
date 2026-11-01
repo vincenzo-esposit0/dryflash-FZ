@@ -10,9 +10,18 @@ pub mod dma;
 pub mod map;
 
 use crate::cpu::{Bus, BusError, Size};
+use crate::periph::flash::{FlashOp, OPTION_BYTE_BASE, OPTION_BYTE_SIZE, PAGE_SIZE};
 use crate::periph::{Ctx, Periphs, ResetKind};
 use crate::trace::digest::Digest;
 use map::*;
+
+/// `FuriHalRtcBootModePostUpdate` (targets/f7/furi_hal/furi_hal_rtc.h).
+const BOOT_MODE_POST_UPDATE: u32 = 4;
+/// `FuriHalRtcFlagLegacySleep` in `SystemReg.flags`, bits 8–15 of BKP1R.
+const SYS_FLAG_LEGACY_SLEEP: u32 = (1 << 5) << 8;
+const SYSCFG_MEMRMP: u32 = 0x4001_0000;
+/// SYSCFG_MEMRMP.MEM_MODE for SRAM1 (LL_SYSCFG_REMAP_SRAM).
+const MEM_MODE_SRAM1: u32 = 3;
 
 /// Fidelity of a modelled component (shown in the UI's "Hardware fidelity" table).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +50,12 @@ pub struct SystemBus {
     /// Current virtual time, updated by the machine before each CPU slice.
     pub now: u64,
     access_pc: u32,
+    /// SYSCFG_MEMRMP selects SRAM1 at address 0 (how the updater runs from RAM).
+    sram_at_zero: bool,
+    /// Flash range written since the last `take_flash_dirty` (decoded instructions go stale).
+    flash_dirty: Option<(u32, u32)>,
+    /// OBL_LAUNCH asked for a reload of the option bytes: a system reset.
+    pub reset_requested: bool,
     /// Virtual-device setting: Settings → System → Sleep Method = Legacy (ADR-0012).
     pub legacy_sleep: bool,
     /// CPU2 behavioural model (FUS without wireless stack, ADR-0012).
@@ -92,6 +107,9 @@ impl SystemBus {
             access_pc: 0,
             cpu2: cpu2::Cpu2::default(),
             legacy_sleep: true,
+            sram_at_zero: false,
+            flash_dirty: None,
+            reset_requested: false,
         };
         // A virtual device ships provisioned, like a production unit (BRIEF §5.1).
         bus.provision_otp(&crate::board::otp::BoardInfo::default());
@@ -116,8 +134,69 @@ impl SystemBus {
     pub fn reset_peripherals(&mut self, kind: ResetKind) {
         self.periphs.reset(kind, self.now);
         self.cpu2.reset();
+        self.sram_at_zero = false;
+        self.reset_requested = false;
         if kind == ResetKind::PowerOn && self.legacy_sleep {
             self.preset_backup_domain();
+        } else if self.legacy_sleep && self.boot_mode() == BOOT_MODE_POST_UPDATE {
+            // The updater clears the flag (update_task_worker_flash_writer) and the virtual device
+            // could not keep up without it: the device setting holds across an update (ADR-0012).
+            let sys = self.periphs.rtc.backup(1);
+            self.periphs.rtc.set_backup(1, sys | SYS_FLAG_LEGACY_SLEEP);
+        }
+    }
+
+    /// `SystemReg.boot_mode` in RTC BKP1R (targets/f7/furi_hal/furi_hal_rtc.c).
+    fn boot_mode(&self) -> u32 {
+        (self.periphs.rtc.backup(1) >> 16) & 0xF
+    }
+
+    /// Sets `SystemReg.boot_mode` (FuriHalRtcBootMode).
+    pub fn set_boot_mode(&mut self, mode: u32) {
+        let sys = self.periphs.rtc.backup(1) & !(0xF << 16);
+        self.periphs.rtc.set_backup(1, sys | (mode & 0xF) << 16);
+    }
+
+    /// Flash range written since the previous call, as (address, length).
+    pub fn take_flash_dirty(&mut self) -> Option<(u32, u32)> {
+        self.flash_dirty.take().map(|(lo, hi)| (lo, hi - lo))
+    }
+
+    fn mark_flash(&mut self, addr: u32, len: u32) {
+        let (lo, hi) = self.flash_dirty.unwrap_or((addr, addr + len));
+        self.flash_dirty = Some((lo.min(addr), hi.max(addr + len)));
+    }
+
+    /// Carries out what the FLASH controller decided.
+    fn flash_service(&mut self) {
+        match self.periphs.flash.take_op() {
+            Some(FlashOp::ErasePage(page)) => {
+                let start = page * PAGE_SIZE;
+                if let Some(p) = self.flash.get_mut(start..start + PAGE_SIZE) {
+                    p.fill(0xFF);
+                    self.mark_flash(FLASH_BASE + start as u32, PAGE_SIZE as u32);
+                }
+            }
+            Some(FlashOp::Reload) => self.reset_requested = true,
+            None => {}
+        }
+    }
+
+    /// A CPU write to flash memory in programming mode (RM0434: 64 bits at a time; a programmed
+    /// double word can only be changed to all zeros).
+    fn flash_program(&mut self, offset: usize, value: u32, size: Size) {
+        let addr = FLASH_BASE + offset as u32;
+        if let Some((a, v)) = self.periphs.flash.program_word(addr, value, size == Size::Word) {
+            let o = (a - FLASH_BASE) as usize;
+            let Some(cell) = self.flash.get_mut(o..o + 8) else {
+                return;
+            };
+            if cell.iter().any(|&b| b != 0xFF) && v != 0 {
+                self.periphs.flash.program_error();
+                return;
+            }
+            cell.copy_from_slice(&v.to_le_bytes());
+            self.mark_flash(a, 8);
         }
     }
 
@@ -149,6 +228,9 @@ impl SystemBus {
             return Some(rd(&self.flash, o, size));
         }
         if let Some(o) = within(addr, size, 0, BOOT_ALIAS_SIZE) {
+            if self.sram_at_zero {
+                return self.sram1.get(o..o + size as usize).map(|_| rd(&self.sram1, o, size));
+            }
             return Some(rd(&self.flash, o, size));
         }
         if let Some(o) = within(addr, size, SRAM2A_BASE, SRAM2A_SIZE) {
@@ -162,6 +244,9 @@ impl SystemBus {
         }
         if let Some(o) = within(addr, size, ENGI_BASE, ENGI_SIZE) {
             return Some(rd(&self.engi, o, size));
+        }
+        if let Some(o) = within(addr, size, OPTION_BYTE_BASE, OPTION_BYTE_SIZE) {
+            return Some(rd(&self.periphs.flash.ob, o, size));
         }
         None
     }
@@ -204,12 +289,30 @@ impl Bus for SystemBus {
             wr(&mut self.sram2b, o, value, size);
             return Ok(());
         }
+        if self.sram_at_zero
+            && let Some(o) = within(addr, size, 0, SRAM1_SIZE)
+        {
+            wr(&mut self.sram1, o, value, size);
+            return Ok(());
+        }
+        if let Some(o) = within(addr, size, FLASH_BASE, FLASH_SIZE)
+            && self.periphs.flash.programming()
+        {
+            self.flash_program(o, value, size);
+            return Ok(());
+        }
         let mut ctx = Ctx {
             now: self.now,
             digest: &mut self.digest,
             pc: self.access_pc,
         };
         if self.periphs.write(addr, value, size, &mut ctx) {
+            if addr.wrapping_sub(crate::periph::svd::FLASH.base) < 0x400 {
+                self.flash_service();
+            }
+            if addr == SYSCFG_MEMRMP {
+                self.sram_at_zero = self.periphs.peek(SYSCFG_MEMRMP).unwrap_or(0) & 7 == MEM_MODE_SRAM1;
+            }
             if dma::concerns_dma(addr) {
                 self.dma_service();
             }

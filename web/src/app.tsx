@@ -27,7 +27,10 @@ export function App() {
   const [firmware, setFirmware] = useState<string | null>(null);
   const [persistence, setPersistence] = useState<Persistence>("none");
   const [cardCapacity, setCardCapacity] = useState(0);
+  const [cardUsed, setCardUsed] = useState(0);
   const [installed, setInstalled] = useState<string | null>(null);
+  const [ota, setOta] = useState(false);
+  const otaRef = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [leds, setLeds] = useState<[number, number, number, number]>([0, 0, 0, 0]);
   const [log, setLog] = useState("");
@@ -59,6 +62,7 @@ export function App() {
           setFidelity(m.fidelity);
           setPersistence(m.persistence);
           setCardCapacity(m.cardCapacityBytes);
+          setCardUsed(m.cardUsedBytes);
           setReady(true);
           break;
         case "loaded":
@@ -71,6 +75,12 @@ export function App() {
           setLog("");
           setStop(null);
           setError(null);
+          break;
+        case "otaStarted":
+          setFirmware(m.name);
+          setStop(null);
+          setError(null);
+          setInstalled(tr("otaStarted").replace("{name}", m.name).replace("{info}", m.info));
           break;
         case "frame":
           bits.current = new Uint8Array(m.bits);
@@ -107,6 +117,17 @@ export function App() {
         void fetch(fw)
           .then((r) => r.arrayBuffer())
           .then((bytes) => w.postMessage({ type: "load", name: fw.split("/").pop()!, bytes }, [bytes]));
+        // `&ota=<path>`: once it has booted, hand a package to its updater.
+        const pkg = new URLSearchParams(location.search).get("ota");
+        if (pkg) {
+          setTimeout(() => {
+            void fetch(pkg)
+              .then((r) => r.arrayBuffer())
+              .then((bytes) =>
+                w.postMessage({ type: "load", name: pkg.split("/").pop()!, bytes, ota: true }, [bytes]),
+              );
+          }, 8000);
+        }
       };
       w.addEventListener("message", onReady);
     }
@@ -160,7 +181,7 @@ export function App() {
   const load = async (file: File) => {
     setError(null);
     const bytes = await file.arrayBuffer();
-    send({ type: "load", name: file.name, bytes }, [bytes]);
+    send({ type: "load", name: file.name, bytes, ota: otaRef.current }, [bytes]);
   };
 
   const onDrop = (e: DragEvent) => {
@@ -241,6 +262,20 @@ export function App() {
         </label>
         <p class="hint">{tr("privacy")}</p>
         {installed && <p class="hint">{installed}</p>}
+        <label>
+          <input
+            type="checkbox"
+            checked={ota}
+            disabled={!firmware}
+            onChange={(e) => {
+              const on = (e.currentTarget as HTMLInputElement).checked;
+              setOta(on);
+              otaRef.current = on;
+            }}
+          />{" "}
+          {tr("otaMode")}
+        </label>
+        <p class="hint">{tr("otaNote")}</p>
         <div class="controls">
           <button
             type="button"
@@ -301,7 +336,7 @@ export function App() {
         <h2>{tr("card")}</h2>
         <p class="hint">
           {tr("cardUsage")
-            .replace("{used}", ((status?.cardUsedBytes ?? 0) / 1e6).toFixed(1))
+            .replace("{used}", ((status?.cardUsedBytes ?? cardUsed) / 1e6).toFixed(1))
             .replace("{total}", (cardCapacity / 1e6).toFixed(0))}{" "}
           {tr(`persist_${persistence}` as Key)}
         </p>

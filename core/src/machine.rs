@@ -187,6 +187,17 @@ impl Machine {
         }
     }
 
+    /// Starts the firmware's own update of a package staged on the card
+    /// (`package::stage_ota`): what `update_operation_prepare` leaves behind after its checks, the
+    /// boot mode for the updater, followed by a system reset.
+    pub fn start_ota(&mut self) {
+        const FURI_HAL_RTC_BOOT_MODE_PRE_UPDATE: u32 = 2;
+        self.bus.set_boot_mode(FURI_HAL_RTC_BOOT_MODE_PRE_UPDATE);
+        self.bus.now = self.cpu.cycles;
+        self.bus.reset_peripherals(ResetKind::Software);
+        self.reset_cpu("update armed");
+    }
+
     /// Presses or releases a button; the firmware sees it through GPIO and EXTI.
     pub fn set_button(&mut self, b: crate::board::Button, pressed: bool) {
         self.bus.periphs.set_button(b, pressed);
@@ -220,7 +231,17 @@ impl Machine {
                 break RunExit::Budget;
             }
             self.bus.now = self.cpu.cycles;
-            match self.cpu.run(&mut self.bus, &mut self.cache, budget) {
+            let stop = self.cpu.run(&mut self.bus, &mut self.cache, budget);
+            if let Some((addr, len)) = self.bus.take_flash_dirty() {
+                self.cache.invalidate(addr, len);
+            }
+            if self.bus.reset_requested {
+                self.bus.now = self.cpu.cycles;
+                self.bus.reset_peripherals(ResetKind::Software);
+                self.reset_cpu("option bytes reload (OBL_LAUNCH)");
+                continue;
+            }
+            match stop {
                 Stop::Budget => break RunExit::Budget,
                 Stop::Sleep { pc } => match earliest(self.cpu.next_event(), self.bus.next_event()) {
                     // WFI fast-forward: jump to the next scheduled event.

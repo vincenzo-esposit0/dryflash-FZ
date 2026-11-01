@@ -22,7 +22,8 @@ export interface CrashRecord {
 }
 
 export type ToWorker =
-  | { type: "load"; name: string; bytes: ArrayBuffer }
+  /** `ota`: hand an update package to the running firmware's updater instead of a quick install. */
+  | { type: "load"; name: string; bytes: ArrayBuffer; ota?: boolean }
   | { type: "eraseCard" }
   | { type: "flush" }
   | { type: "button"; button: ButtonName; down: boolean }
@@ -49,9 +50,11 @@ export type FromWorker =
       fidelity: FidelityRow[];
       persistence: Persistence;
       cardCapacityBytes: number;
+      cardUsedBytes: number;
     }
   /** `packageInfo` for an update package: its version and the files put on the card. */
   | { type: "loaded"; name: string; packageInfo?: { info: string; files: number } }
+  | { type: "otaStarted"; name: string; info: string }
   | { type: "error"; message: string }
   | { type: "frame"; bits: ArrayBuffer }
   | { type: "lights"; rgbw: [number, number, number, number] }

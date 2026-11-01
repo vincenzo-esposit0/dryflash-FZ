@@ -47,5 +47,8 @@
   "persist_indexeddb": "Salvata in questo browser (IndexedDB).",
   "persist_none": "Non salvata: si perde chiudendo questa pagina. Forse un'altra scheda del browser la sta usando, oppure il browser blocca lo storage.",
   "eraseCard": "Cancella la scheda",
-  "eraseConfirm": "Cancellare tutta la scheda SD virtuale? Tutto il contenuto va perso, comprese le impostazioni salvate del dispositivo. Il dispositivo si riavvia."
+  "eraseConfirm": "Cancellare tutta la scheda SD virtuale? Tutto il contenuto va perso, comprese le impostazioni salvate del dispositivo. Il dispositivo si riavvia.",
+  "otaMode": "Installa i pacchetti con l'updater del firmware (OTA reale)",
+  "otaNote": "Serve un firmware già in esecuzione qui. Il dispositivo si riavvia nel suo updater, che fa il backup, scrive la flash, la verifica e scompatta le risorse da solo: ci vuole circa un minuto. Resta fuori solo lo stack radio: questo emulatore non ha un core radio su cui installarlo (ADR-0014).",
+  "otaStarted": "OTA reale di {name} ({info}) avviata: seguila sullo schermo."
 }

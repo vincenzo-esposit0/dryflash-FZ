@@ -491,3 +491,45 @@ The custom firmwares were only booted to the Desktop's animations; their apps we
   `L1_Waves_128x50` plays from the saved resources. After "Erase card": a new card, no saved state,
   `L0_NoDb_128x51`. Not tested in a browser: the IndexedDB fallback, and two tabs at once.
 - wasm size with the package code: 454 KB.
+
+### Checkpoint 4 — FLASH controller and Real OTA
+
+- `periph/flash.rs`: unlock sequences, page erase, 64-bit and fast programming with the sequence and
+  "already programmed" errors, option bytes. The virtual device's option bytes are the `OB reference`
+  of the packages, identical in all four pinned ones. Sector protection is not enforced.
+- `SYSCFG_MEMRMP` maps SRAM1 at address 0: how the updater runs from RAM. Written flash invalidates
+  decoded instructions. Flash now survives a power cycle in the web app (it used to be reloaded from
+  the image, which would have undone an update).
+- `package::stage_ota` + `Machine::start_ota`: the package in `/ext/update/<name>/`, the `.fupdate`
+  pointer, boot mode PreUpdate, reset. Radio entries emptied (ADR-0014, **proposed**).
+- **Unleashed → official, firmware's own updater** (`core/tests/ota_official.rs`, also run in the
+  browser with OPFS): `/int` backup, reset; `1.5.1 (RAM)` runs from SRAM1; option bytes validated
+  (stage 8), DFU validated, flash written and read back (9–11), reset; `/int` restored (12), old
+  resources removed via Manifest (13–14), resources unpacked (15), splash (16), reset; normal boot of
+  1.5.1. 25 s virtual. The test compares flash with the package's image and every resource file with
+  the package: all identical. No crash, no unmapped access.
+- **A wrong first attempt, caught by the byte comparison:** removing the `Radio*` lines made the
+  update look successful while skipping resources and option bytes, because `update_manifest_init`
+  reads keys in order and a missing key hides the later ones. The keys now stay with empty values,
+  the way `scripts/update.py` writes a package without radio.
+- The updater clears `FuriHalRtcFlagLegacySleep`; with the device setting on, it is set again when
+  the machine resets into PostUpdate (ADR-0014).
+- Speed during the update in the browser: 46 MIPS, 0.72× while unpacking.
+- Seen once, not reproduced: `RangeError: Invalid typed array length: 144115188075855870` on the first
+  page load right after restarting the dev server with a freshly rebuilt wasm; two later reloads and
+  the whole OTA were clean. Probably a stale pairing of `dryflash.js` and the `.wasm` on the dev server
+  (production assets are hashed). Keep an eye on it.
+- **Not tested:** a package's radio stage; OTA of Momentum and RogueMaster; option bytes that do not
+  match (the repair path). Live site not checked yet: this branch is not deployed.
+
+### Demo
+
+```sh
+node scripts/fetch-firmware.mjs official --elf && node scripts/fetch-firmware.mjs unleashed
+cargo run --release -p dryflash-core --example ota -- \
+  firmware/cache/unleashed/flipper-z-f7-update-unlshd-094.tgz \
+  firmware/cache/official/flipper-z-f7-update-1.5.1.tgz 60
+cargo test --workspace --release -- --include-ignored
+```
+
+In the web app: load a `.tgz`, tick "Install packages with the firmware's own updater", load another.

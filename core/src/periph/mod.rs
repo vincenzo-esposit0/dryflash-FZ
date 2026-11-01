@@ -8,6 +8,7 @@
 
 pub mod dma;
 pub mod exti;
+pub mod flash;
 pub mod gpio;
 pub mod hsem;
 pub mod i2c;
@@ -80,6 +81,7 @@ enum Slot {
     Hsem,
     Ipcc,
     Dma(usize),
+    Flash,
     Rng,
     Lptim(usize),
     Generic(usize),
@@ -94,6 +96,7 @@ pub struct Periphs {
     pub i2c: Vec<i2c::I2c>,
     /// SPI1 (radio, NFC, external), SPI2 (display, SD card).
     pub spi: Vec<spi::Spi>,
+    pub flash: flash::Flash,
     /// DMA1, DMA2.
     pub dma: Vec<dma::Dma>,
     /// USART1 (Furi log / CLI), LPUART1.
@@ -174,6 +177,7 @@ impl Periphs {
                 "RTC" => Slot::Rtc,
                 "HSEM" => Slot::Hsem,
                 "IPCC" => Slot::Ipcc,
+                "Flash" => Slot::Flash,
                 "DMA1" | "DMA2" => {
                     let i = (d.name == "DMA2") as usize;
                     dma[i] = Some(dma::Dma::new(d));
@@ -204,6 +208,7 @@ impl Periphs {
             exti: exti::Exti::new(),
             i2c,
             spi: spi.into_iter().map(|s| s.expect("SPI1 and SPI2 in the SVD")).collect(),
+            flash: flash::Flash::new(),
             dma: dma.into_iter().map(|d| d.expect("DMA1 and DMA2 in the SVD")).collect(),
             usart: usart
                 .into_iter()
@@ -378,6 +383,7 @@ impl Periphs {
         self.hsem.reset();
         self.ipcc.reset();
         self.dma.iter_mut().for_each(|d| d.reset());
+        self.flash.reset();
         self.rng.reset();
         self.lptim.iter_mut().for_each(|l| l.reset());
         if kind == ResetKind::PowerOn {
@@ -485,6 +491,7 @@ impl Periphs {
             Slot::Hsem => &self.hsem.regs,
             Slot::Ipcc => &self.ipcc.regs,
             Slot::Dma(i) => &self.dma[i].regs,
+            Slot::Flash => &self.flash.regs,
             Slot::Rng => &self.rng.regs,
             Slot::Lptim(i) => &self.lptim[i].regs,
             Slot::Generic(i) => &self.generic[i],
@@ -528,6 +535,7 @@ impl Periphs {
             Slot::Hsem => self.hsem.read(word_off),
             Slot::Ipcc => self.ipcc.regs.read(word_off),
             Slot::Dma(i) => self.dma[i].regs.read(word_off),
+            Slot::Flash => self.flash.regs.read(word_off),
             Slot::Rng => self.rng.read(word_off),
             Slot::Lptim(i) => {
                 let ns = self.now_ns(ctx.now);
@@ -615,6 +623,7 @@ impl Periphs {
                 self.update_irqs();
                 h
             }
+            Slot::Flash => self.flash.write(word_off, value),
             Slot::Dma(i) => {
                 let h = self.dma[i].write(word_off, value);
                 self.update_irqs();
@@ -728,6 +737,11 @@ impl Periphs {
                 "DMA1/DMA2 + DMAMUX",
                 Partial,
                 "SPI requests only, transfers instantaneous; other requests stay idle",
+            ),
+            (
+                "FLASH controller",
+                Partial,
+                "unlock, page erase, 64-bit and fast programming, option bytes; instant; no sector protection",
             ),
             ("Buttons", Emulated, "six keys with the board's polarity and pulls"),
             (
