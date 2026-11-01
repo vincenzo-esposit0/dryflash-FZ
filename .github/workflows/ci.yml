@@ -153,7 +153,20 @@ jobs:
         run: npx wrangler deploy --config proxy/wrangler.jsonc
       - name: Upload preview version
         if: github.event_name == 'pull_request'
-        run: >-
-          npx wrangler versions upload --config proxy/wrangler.jsonc
-          --preview-alias pr-${{ github.event.pull_request.number }}
-          --message "PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.head.sha }}"
+        # Only `wrangler deploy` can create the Worker, and that publishes production, which
+        # happens on main alone. So until the first merge there is nothing to attach a preview
+        # to: say so. Any other failure stays a failure.
+        run: |
+          set +e
+          out=$(npx wrangler versions upload --config proxy/wrangler.jsonc \
+            --preview-alias pr-${{ github.event.pull_request.number }} \
+            --message "PR #${{ github.event.pull_request.number }} ${{ github.event.pull_request.head.sha }}" 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          if [ "$code" -ne 0 ] && grep -q "Worker that does not yet exist" <<<"$out"; then
+            echo "::warning::No preview published: the Worker does not exist until the first deploy from main."
+            echo "No preview published: the Worker does not exist until the first deploy from main." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$code"

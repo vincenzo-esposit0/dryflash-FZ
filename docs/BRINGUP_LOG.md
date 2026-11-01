@@ -403,3 +403,7 @@ modelled when a firmware starts it.
 - CI job `deploy` (after rust, cpu-fuzz, web, licences): `main` → `wrangler deploy`; pull requests
   from this repository → preview version `pr-<n>`. Needs the repository secrets of
   docs/DEPLOY.md; the preview URL is recorded here once live.
+- First CI run (PR #1): token and account accepted, all checks green, but `wrangler versions
+  upload` refuses a Worker that does not exist yet. Only `wrangler deploy` creates it, and that
+  publishes production, reserved for `main`. The preview step now reports this one case as a
+  warning; PR #1 therefore has no preview, and the first live check is production after merge.
