@@ -24,7 +24,9 @@ from `web/public/_headers`. GitHub Actions deploys it after every CI job passed
    *New repository secret*: `CLOUDFLARE_API_TOKEN` (the token) and `CLOUDFLARE_ACCOUNT_ID`.
    Never paste the token anywhere else (chat, issues, commits).
 
-The first run on `main` creates the Worker. Without the secrets the `deploy` job fails with an
+The first run on `main` creates the Worker. `wrangler versions upload` cannot create one, so
+pull requests opened before that first deploy publish no preview: the job passes with a warning
+saying so. Without the secrets the `deploy` job fails with an
 explicit error; every other job is unaffected.
 
 ## Local check
