@@ -8,7 +8,7 @@ use dryflash_core::board::fat32;
 use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
 use dryflash_core::bus::Fidelity;
 use dryflash_core::loader::dfu;
-use dryflash_core::loader::package::{Package, install_resources};
+use dryflash_core::loader::package::{Package, install_resources, stage_ota};
 use dryflash_core::machine::{Machine, RunExit};
 use wasm_bindgen::prelude::*;
 
@@ -41,8 +41,8 @@ pub enum Exit {
 #[wasm_bindgen]
 pub struct Emulator {
     m: Machine,
-    image: Option<dfu::Dfu>,
-    cpu2_start: Option<u32>,
+    /// A firmware is in flash.
+    loaded: bool,
     /// USART1 bytes already handed to the host.
     log_read: usize,
     /// Description of the last non-budget exit.
@@ -55,6 +55,9 @@ impl Emulator {
     fn fresh_machine(&mut self) -> Machine {
         let mut m = Machine::new();
         m.bus.legacy_sleep = self.m.bus.legacy_sleep;
+        // What the updater or the firmware programmed survives, like on real flash.
+        m.bus.flash.copy_from_slice(&self.m.bus.flash);
+        m.bus.periphs.flash.ob = self.m.bus.periphs.flash.ob;
         if let Some(old) = self.m.bus.periphs.remove_sd() {
             let mut card = SdCard::new(old.capacity_blocks(), BlockStore::default());
             card.store = old.store;
@@ -92,8 +95,7 @@ impl Emulator {
     pub fn new() -> Emulator {
         Emulator {
             m: Machine::new(),
-            image: None,
-            cpu2_start: None,
+            loaded: false,
             log_read: 0,
             last_stop: String::new(),
         }
@@ -109,8 +111,7 @@ impl Emulator {
         let mut m = self.fresh_machine();
         m.load_dfu(&image, cpu2).map_err(|e| e.to_string())?;
         self.m = m;
-        self.image = Some(image);
-        self.cpu2_start = cpu2;
+        self.loaded = true;
         Ok(())
     }
 
@@ -132,11 +133,30 @@ impl Emulator {
         m.load_dfu(&image, pkg.manifest.radio_address)
             .map_err(|e| e.to_string())?;
         self.m = m;
-        self.image = Some(image);
-        self.cpu2_start = pkg.manifest.radio_address;
+        self.loaded = true;
         Ok(format!(
             "{{\"info\":{},\"files\":{files}}}",
             json_str(&pkg.manifest.info)
+        ))
+    }
+
+    /// Real OTA: stages a package on the card without its radio stack (ADR-0014) and restarts into
+    /// the running firmware's own updater. Returns `{"info", "path"}` as JSON, or an error message.
+    pub fn start_ota(&mut self, bytes: &[u8]) -> Result<String, String> {
+        if !self.loaded {
+            return Err("an update needs a firmware that is already installed".to_string());
+        }
+        let pkg = Package::parse(bytes).map_err(|e| e.to_string())?;
+        if pkg.manifest.target != TARGET_F7 {
+            return Err(format!("package is for target {}, not f7", pkg.manifest.target));
+        }
+        let card = self.m.bus.periphs.sd.as_mut().ok_or("no card")?;
+        let path = stage_ota(&pkg, &mut card.store).map_err(|e| e.to_string())?;
+        self.m.start_ota();
+        Ok(format!(
+            "{{\"info\":{},\"path\":{}}}",
+            json_str(&pkg.manifest.info),
+            json_str(&path)
         ))
     }
 
@@ -200,12 +220,12 @@ impl Emulator {
         self.m.bus.legacy_sleep
     }
 
-    /// Power-on reset: a fresh device with the loaded firmware (RAM and backup domain cleared).
+    /// Power-on reset: RAM and backup domain cleared; flash and the card keep their contents.
     pub fn power_on(&mut self) -> Result<(), String> {
-        let image = self.image.as_ref().ok_or("no firmware loaded")?;
-        let image = image.clone();
+        if !self.loaded {
+            return Err("no firmware loaded".to_string());
+        }
         let mut m = self.fresh_machine();
-        m.load_dfu(&image, self.cpu2_start).map_err(|e| e.to_string())?;
         m.power_on();
         self.m = m;
         self.log_read = 0;
@@ -380,6 +400,18 @@ mod tests {
         again.sd_restore(&new);
         assert_eq!(again.sd_used_bytes(), e.sd_used_bytes());
         assert!(again.sd_take_dirty().is_empty(), "restored blocks are not dirty");
+    }
+
+    #[test]
+    fn flash_survives_a_new_machine() {
+        let mut e = Emulator::new();
+        e.m.bus.flash[100] = 0x42;
+        assert_eq!(e.fresh_machine().bus.flash[100], 0x42);
+    }
+
+    #[test]
+    fn ota_needs_an_installed_firmware() {
+        assert!(Emulator::new().start_ota(&[]).is_err());
     }
 
     #[test]

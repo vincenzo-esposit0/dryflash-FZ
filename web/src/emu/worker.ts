@@ -154,6 +154,16 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         // By content, not by file name: gzip is an update package, anything else must be DfuSe.
         // A bare .dfu does not say where the CPU2 region starts, so no guard applies (0).
         const isPackage = bytes[0] === 0x1f && bytes[1] === 0x8b;
+        if (m.ota && isPackage) {
+          const { info } = JSON.parse(emu.start_ota(bytes));
+          post({ type: "otaStarted", name: m.name, info });
+          running = true;
+          restartPacing();
+          void flushCard();
+          publish(true);
+          schedule(0);
+          break;
+        }
         const packageInfo = isPackage ? JSON.parse(emu.load_tgz(bytes)) : undefined;
         if (!isPackage) emu.load_dfu(bytes, 0);
         loaded = true;
@@ -231,4 +241,5 @@ post({
   fidelity: JSON.parse(emu.fidelity_json()),
   persistence: card.kind,
   cardCapacityBytes: emu.sd_capacity_bytes(),
+  cardUsedBytes: emu.sd_used_bytes(),
 });

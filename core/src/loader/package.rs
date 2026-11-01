@@ -212,6 +212,7 @@ pub struct Manifest {
     pub resources: Option<String>,
     /// First flash address reserved for CPU2 (`Radio address`, little-endian hex).
     pub radio_address: Option<u32>,
+    pub radio_file: Option<String>,
 }
 
 pub fn parse_manifest(text: &str) -> Result<Manifest, PackageError> {
@@ -226,6 +227,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, PackageError> {
             "Target" => m.target = v.parse().unwrap_or(0),
             "Firmware" => m.firmware = v.to_string(),
             "Resources" if !v.is_empty() => m.resources = Some(v.to_string()),
+            "Radio" if !v.is_empty() => m.radio_file = Some(v.to_string()),
             "Radio address" => {
                 let bytes: Vec<u8> = v
                     .split_whitespace()
@@ -251,6 +253,8 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, PackageError> {
 #[derive(Clone, Debug)]
 pub struct Package {
     pub manifest: Manifest,
+    /// Top folder in the archive, e.g. `f7-update-1.5.1`.
+    pub folder: String,
     /// File name (without directories) → content.
     pub files: BTreeMap<String, Vec<u8>>,
 }
@@ -259,8 +263,10 @@ impl Package {
     pub fn parse(tgz: &[u8]) -> Result<Package, PackageError> {
         let tar = gunzip(tgz)?;
         let mut files = BTreeMap::new();
+        let mut folder = String::new();
         for e in untar(&tar)? {
             if !e.is_dir {
+                folder = e.path.rsplit_once('/').map_or("", |(d, _)| d).to_string();
                 let name = e.path.rsplit('/').next().unwrap_or(&e.path).to_string();
                 files.insert(name, e.data);
             }
@@ -275,7 +281,11 @@ impl Package {
                 manifest.firmware
             )));
         }
-        Ok(Package { manifest, files })
+        Ok(Package {
+            manifest,
+            folder,
+            files,
+        })
     }
 
     pub fn firmware(&self) -> &[u8] {
@@ -300,6 +310,43 @@ impl Package {
         };
         untar(&tar)
     }
+}
+
+/// A manifest line for a package with no radio stack, as scripts/update.py writes one: the keys stay,
+/// with empty or zero values, because the firmware reads them in order and a missing key would hide
+/// every key after it (`update_manifest_init`).
+fn without_radio(line: &str) -> String {
+    match line.split_once(':').map(|(k, _)| k.trim()) {
+        Some("Radio") => "Radio: ".to_string(),
+        Some("Radio address") | Some("Radio CRC") => format!("{}: 00 00 00 00", line.split(':').next().unwrap()),
+        Some("Radio version") => "Radio version: 00 00 00 00 00 00".to_string(),
+        _ => line.to_string(),
+    }
+}
+
+/// Stages a package for the firmware's own updater: `/ext/update/<package>/` and the `/ext/.fupdate`
+/// pointer, as `update_operation_prepare` (lib/update_util/update_operation.c) and qFlipper leave
+/// them. The radio stack is left out of the staged manifest: CPU2 is a FUS with nowhere to install
+/// one (ADR-0012, ADR-0014), and the format supports packages without it.
+pub fn stage_ota(
+    pkg: &Package,
+    store: &mut crate::board::sdcard::BlockStore,
+) -> Result<String, crate::board::fat32::FatError> {
+    let mut v = crate::board::fat32::Volume::open(store)?;
+    let dir = format!("update/{}", pkg.folder.rsplit('/').next().unwrap_or("package"));
+    for (name, data) in &pkg.files {
+        if name == "update.fuf" || pkg.manifest.radio_file.as_deref() == Some(name) {
+            continue;
+        }
+        v.write_file(&format!("{dir}/{name}"), data)?;
+    }
+    let manifest = String::from_utf8_lossy(&pkg.files["update.fuf"]);
+    let stripped: String = manifest.lines().map(|l| format!("{}\n", without_radio(l))).collect();
+    v.write_file(&format!("{dir}/update.fuf"), stripped.as_bytes())?;
+    let path = format!("/ext/{dir}/update.fuf");
+    v.write_file(".fupdate", path.as_bytes())?;
+    v.sync();
+    Ok(path)
 }
 
 /// Quick install of the resources: writes the tree to the card's root, which the firmware serves
@@ -400,6 +447,21 @@ mod tests {
         let n = z.len();
         z[n - 8] ^= 1;
         assert!(matches!(gunzip(&z), Err(PackageError::Gzip(_))));
+    }
+
+    #[test]
+    fn a_staged_manifest_keeps_the_radio_keys_with_no_values() {
+        assert_eq!(without_radio("Radio: radio.bin"), "Radio: ");
+        assert_eq!(
+            without_radio("Radio address: 00 70 0D 08"),
+            "Radio address: 00 00 00 00"
+        );
+        assert_eq!(
+            without_radio("Radio version: 01 14 00 00 02 03"),
+            "Radio version: 00 00 00 00 00 00"
+        );
+        assert_eq!(without_radio("Radio CRC: C1 C3 5B 8C"), "Radio CRC: 00 00 00 00");
+        assert_eq!(without_radio("Resources: resources.ths"), "Resources: resources.ths");
     }
 
     #[test]
