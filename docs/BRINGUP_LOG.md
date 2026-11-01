@@ -445,3 +445,29 @@ package, after `node scripts/fetch-firmware.mjs official`:
 - Firmware log with a card: "card detected", "card mounted", state files created under `/int`
   ("State saved"), animation `L0_NoDb_128x51` (no resources on the card yet). After a power cycle
   with the same card the Dolphin state is found again. Commands outside the model: none seen.
+
+### Checkpoint 2 — update packages, resources on the card, apps
+
+- `loader/package.rs`: gzip (CRC checked), tar (ustar, GNU long names; paths with `..` refused),
+  heatshrink data stream (`HSDS`), `update.fuf`. `board/fat32.rs` gained a volume writer and
+  reader: long file names, directories that grow, replacing files, FSInfo.
+- **Quick install** = firmware from the package into flash, resources into the card's root (`/ext`).
+  Files from an older install stay on the card (only the updater's Manifest cleanup removes them).
+- Independent check: `fsck_msdos` (and `fsck.vfat` in CI) finds no errors on cards built from all
+  four pinned packages.
+
+| Package | Resources | Files | Boot, 15 s virtual |
+|---|---|---|---|
+| official 1.5.1 | `.ths` | 1074 | card mounted; app test below |
+| momentum mntm-012 | `.tar.gz` | 2150 | card mounted, no crash, no unmapped access |
+| unleashed unlshd-094 | `.ths` | 1284 | card mounted, no crash, no unmapped access |
+| roguemaster rm-420 | `.tar.gz` | 2071 | card mounted, no crash, no unmapped access |
+
+The custom firmwares were only booted to the Desktop's animations; their apps were not exercised.
+
+- **Apps run from the card.** Through the official firmware's own menus: Apps → `/ext` listing (long
+  lower-case names shown correctly) → apps → Games → `snake_game.fap`: "Loaded in 18ms", the game
+  draws (`core/tests/apps_official.rs`). The Sub-GHz menu entry loads `subghz.fap` too and then
+  reports what the device lacks: "Unable to load decryption key" (no enclave keys), external
+  CC1101 "Init failed".
+- With resources the Desktop plays a real animation (`L1_Waves_128x50`) instead of `L1_NoSd`.
