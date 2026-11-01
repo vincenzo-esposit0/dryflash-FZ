@@ -2,7 +2,8 @@
 # Deployment (Cloudflare Worker with static assets)
 
 Decision and rationale: [ADR-0003](adr/0003-hosting.md). One Worker, named `app`, serves
-`web/dist`; its configuration is `proxy/wrangler.jsonc`. Response headers (CSP, caching) come
+`web/dist` and the allowlisted `/proxy/fetch` route (ADR-0002); its configuration is
+`proxy/wrangler.jsonc`. Response headers (CSP, caching) come
 from `web/public/_headers`. GitHub Actions deploys it after every CI job passed
 (`.github/workflows/ci.yml`, job `deploy`):
 

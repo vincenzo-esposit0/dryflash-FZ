@@ -103,3 +103,9 @@ dialog.ask::backdrop { background: rgb(0 0 0 / 0.6); }
 dialog.ask p { margin: 0 0 12px; }
 dialog.ask input { width: 100%; }
 button.danger { border-color: #e5484d; color: var(--danger); }
+.nav { display: flex; gap: 16px; font: 0.85rem var(--mono); margin-bottom: 12px; }
+.page { max-width: 860px; }
+.page h2, .page h3 { font-family: var(--mono); color: var(--accent); }
+.page p { max-width: 70ch; }
+.muted { color: var(--muted); }
+.layout.embed { display: block; }

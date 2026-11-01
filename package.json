@@ -9,6 +9,6 @@
   ],
   "scripts": {
     "build": "npm run build -w web",
-    "test": "npm test -w web"
+    "test": "npm test -w web && npm test -w proxy"
   }
 }

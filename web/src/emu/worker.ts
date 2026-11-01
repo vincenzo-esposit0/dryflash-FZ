@@ -7,6 +7,7 @@ import {
   encodeExport,
   gunzip,
   gzip,
+  MemoryBackend,
   newDevice,
   openDevices,
   type DeviceBackend,
@@ -41,6 +42,10 @@ const presses = new PressTimer();
 let lastGeneration = -1;
 let lastLights = "";
 let lastCrashes = 0;
+/** Recent log text, enough to find a marker split across two reads. */
+let logTail = "";
+let milestones = { booted: false, desktopReached: false };
+const logDecoder = new TextDecoder();
 let report = { wall: 0, virtualMs: 0, instructions: 0 };
 
 // With work pending the next slice comes through a message port: timers wait at least 4 ms when
@@ -118,6 +123,15 @@ function publish(force: boolean) {
   }
   const log = e.take_log();
   if (log.length) {
+    logTail = (logTail + logDecoder.decode(log, { stream: true })).slice(-4096);
+    if (!milestones.booted && logTail.includes("Startup complete")) {
+      milestones.booted = true;
+      post({ type: "milestone", name: "booted" });
+    }
+    if (!milestones.desktopReached && logTail.includes("[AnimationManager]") && /Select '/.test(logTail)) {
+      milestones.desktopReached = true;
+      post({ type: "milestone", name: "desktopReached" });
+    }
     const bytes = log.slice().buffer;
     post({ type: "log", bytes }, [bytes]);
   }
@@ -275,6 +289,8 @@ function powerOn() {
   lastGeneration = -1;
   lastLights = "";
   lastCrashes = 0;
+  logTail = "";
+  milestones = { booted: false, desktopReached: false };
   post({ type: "crashes", crashes: [] });
   report = { wall: 0, virtualMs: 0, instructions: 0 };
   running = true;
@@ -287,7 +303,8 @@ function powerOn() {
 const waiting: ToWorker[] = [];
 
 ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
-  if (emu) handle(ev.data);
+  if (ev.data.type === "init") void start(ev.data.ephemeral);
+  else if (emu) handle(ev.data);
   else waiting.push(ev.data);
 };
 
@@ -299,7 +316,22 @@ function handle(m: ToWorker) {
   if (!emu) return;
   try {
     switch (m.type) {
+      case "symbols":
+        emu.load_symbols(new Uint8Array(m.bytes));
+        break;
       case "load": {
+        if (m.deviceLabel !== undefined) {
+          const { deviceLabel, ...load } = m;
+          void flushCard();
+          queue("switching device", async () => {
+            if (device!.label !== deviceLabel) {
+              const known = (await devices!.list()).find((d) => d.label === deviceLabel);
+              await activate(known ?? newDevice(deviceLabel, crypto.randomUUID().slice(0, 8)));
+            }
+            handle(load);
+          });
+          break;
+        }
         running = false;
         const bytes = new Uint8Array(m.bytes);
         // By content, not by file name: gzip is an update package, anything else must be DfuSe.
@@ -479,14 +511,16 @@ function handle(m: ToWorker) {
   }
 }
 
-await init();
-devices = await openDevices();
-const known = await devices.list();
-const activeId = await devices.getActive();
-await activate(known.find((d) => d.id === activeId) ?? known[0] ?? newDevice("Device 1", "default"));
-post({
-  type: "ready",
-  version: version(),
-  protocol: PROTOCOL_VERSION,
-  fidelity: JSON.parse((emu as unknown as Emulator).fidelity_json()),
-});
+async function start(ephemeral: boolean) {
+  await init();
+  devices = ephemeral ? new MemoryBackend() : await openDevices();
+  const known = await devices.list();
+  const activeId = await devices.getActive();
+  await activate(known.find((d) => d.id === activeId) ?? known[0] ?? newDevice("Device 1", "default"));
+  post({
+    type: "ready",
+    version: version(),
+    protocol: PROTOCOL_VERSION,
+    fidelity: JSON.parse(emu!.fidelity_json()),
+  });
+}
