@@ -105,7 +105,13 @@ pub fn format(store: &mut BlockStore, capacity_blocks: u32, serial: u32) -> Layo
     put32(&mut fat, 8, END_OF_CHAIN);
     store.write(PARTITION_START + RESERVED, &fat);
     store.write(PARTITION_START + RESERVED + l.fat_sectors, &fat);
-    // The root directory cluster is all zero: unwritten blocks already read as zero.
+    // The root directory holds only the volume label, which must match the boot sector's.
+    let mut root = [0u8; BLOCK_SIZE];
+    root[..11].copy_from_slice(b"DRYFLASH   ");
+    root[11] = ATTR_VOLUME;
+    root[22..24].copy_from_slice(&0u16.to_le_bytes());
+    root[24..26].copy_from_slice(&FAT_DATE.to_le_bytes());
+    store.write(PARTITION_START + l.first_data_sector, &root);
     l
 }
 
@@ -677,6 +683,19 @@ mod tests {
     }
 
     #[test]
+    fn root_has_the_boot_sector_label_and_lists_as_empty() {
+        let mut s = BlockStore::default();
+        let l = format(&mut s, ONE_GIB, 7);
+        let mut b = [0u8; 512];
+        s.read(PARTITION_START + l.first_data_sector, &mut b);
+        assert_eq!((&b[..11], b[11]), (&b"DRYFLASH   "[..], ATTR_VOLUME));
+        let mut boot = [0u8; 512];
+        s.read(PARTITION_START, &mut boot);
+        assert_eq!(boot[71..82], b[..11]);
+        assert!(Volume::open(&mut s).unwrap().list_dir(2).is_empty());
+    }
+
+    #[test]
     fn format_writes_mbr_boot_sector_and_fats() {
         let mut s = BlockStore::default();
         let l = format(&mut s, ONE_GIB, 0x1234_5678);
@@ -691,7 +710,7 @@ mod tests {
             assert_eq!(u32::from_le_bytes(b[0..4].try_into().unwrap()), 0x0FFF_FFF8);
             assert_eq!(u32::from_le_bytes(b[8..12].try_into().unwrap()), END_OF_CHAIN);
         }
-        assert!(s.used_blocks() < 10, "a formatted card stays sparse");
+        assert!(s.used_blocks() < 12, "a formatted card stays sparse");
     }
 
     fn volume_store() -> BlockStore {
