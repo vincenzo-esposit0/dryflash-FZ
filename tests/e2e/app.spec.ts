@@ -129,7 +129,10 @@ test.describe("with a firmware", () => {
     const row = page.locator(".files li", { hasText: "my long test name.sub" });
     await expect(row).toBeVisible();
     const [download] = await Promise.all([page.waitForEvent("download"), row.getByRole("button", { name: "Download" }).click()]);
-    expect(download.suggestedFilename()).toBe("my long test name.sub");
+    // WebKit on Linux turns the spaces of a download's name into underscores; the bytes are what matter.
+    expect(download.suggestedFilename().replace(/_/g, " ")).toBe("my long test name.sub");
+    const saved = await (await import("node:fs/promises")).readFile(await download.path());
+    expect(saved.toString()).toBe("Filetype: test\n");
     await row.getByRole("button", { name: "Delete" }).click();
     await page.locator("dialog.ask button[type=submit]").click();
     await expect(row).toHaveCount(0);
