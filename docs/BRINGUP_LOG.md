@@ -520,7 +520,7 @@ The custom firmwares were only booted to the Desktop's animations; their apps we
   the whole OTA were clean. Probably a stale pairing of `dryflash.js` and the `.wasm` on the dev server
   (production assets are hashed). Keep an eye on it.
 - **Not tested:** a package's radio stage; OTA of Momentum and RogueMaster; option bytes that do not
-  match (the repair path). Live site not checked yet: this branch is not deployed.
+  match (the repair path). 
 
 ### Demo
 
@@ -533,3 +533,20 @@ cargo test --workspace --release -- --include-ignored
 ```
 
 In the web app: load a `.tgz`, tick "Install packages with the firmware's own updater", load another.
+
+### M4 closed
+
+- Live at https://app.dryflash.workers.dev since `4d50b03`.
+- **Checked by the maintainer on the PR #3 preview**, with the firmware running on the deployed Worker:
+  quick install of a package, an app from the card, the card still there after a reload, Real OTA
+  from Unleashed to the official firmware. Definition of done met, with the radio stage left out by
+  decision (ADR-0014).
+- Checked on the live site from the built-in browser: the page, the wasm core under the CSP, the card
+  saved in the browser, no console errors.
+- `fsck.vfat` in CI caught what `fsck_msdos` had not: a boot-sector label with no entry in the root
+  directory. Cards prepared earlier keep that harmless inconsistency.
+
+Known limits at the end of M4: no Bluetooth and no factory keys (ADR-0012); radio stage of packages
+not tested (ADR-0014); only the card persists, the firmware is loaded again after a reload (M5);
+OTA of Momentum and RogueMaster, the option-byte repair path, the IndexedDB fallback and two tabs at
+once not tested; wasm CPU benchmark still below its M0 figure.
