@@ -715,7 +715,19 @@ export function App({ embed = false }: { embed?: boolean }) {
           setError(m.message);
           toParent({ type: "error", message: m.message });
           break;
+        case "uncaught":
+          console.error("dryflash worker:", m.stack ?? m.message);
+          setError(m.message);
+          toParent({ type: "error", message: m.message });
+          break;
       }
+    };
+    // Only what the worker could not report itself: its script did not load.
+    w.onerror = (ev) => {
+      const message = ev.message || "the emulator's worker did not start";
+      console.error("dryflash worker:", message);
+      setError(message);
+      toParent({ type: "error", message });
     };
     redraw();
     w.postMessage({ type: "init", ephemeral: embed } satisfies ToWorker);

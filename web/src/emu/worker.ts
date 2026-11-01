@@ -24,6 +24,21 @@ const FLUSH_MS = 1000;
 /** Attempts 250 ms apart: about 3 seconds. */
 const CARD_OPEN_RETRIES = 12;
 
+// Without these an exception here reaches neither the page nor the page's error handlers: a failed start
+// would leave "Loading" on the screen for good, and the E2E suite would not see it.
+function reportUncaught(reason: unknown) {
+  const err = reason instanceof Error ? reason : null;
+  post({ type: "uncaught", message: err?.message ?? String(reason), stack: err?.stack });
+}
+ctx.addEventListener("unhandledrejection", (e) => {
+  e.preventDefault();
+  reportUncaught(e.reason);
+});
+ctx.addEventListener("error", (e) => {
+  e.preventDefault();
+  reportUncaught(e.error ?? e.message);
+});
+
 let emu: Emulator | null = null;
 let card: CardStore | null = null;
 let devices: DeviceBackend | null = null;

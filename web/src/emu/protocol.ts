@@ -93,6 +93,8 @@ export type FromWorker =
   | { type: "loaded"; name: string; packageInfo?: { info: string; files: number } }
   | { type: "otaStarted"; name: string; info: string }
   | { type: "error"; message: string }
+  /** An exception nothing in the worker caught, such as a failed start. */
+  | { type: "uncaught"; message: string; stack?: string }
   /** From the firmware's log (docs/EMBED.md). */
   | { type: "milestone"; name: "booted" | "desktopReached" }
   | { type: "frame"; bits: ArrayBuffer }
