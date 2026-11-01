@@ -638,7 +638,7 @@ once not tested; wasm CPU benchmark still below its M0 figure.
 
 ### Checkpoint 4 — accessibility and end-to-end tests
 
-- `tests/e2e`: Playwright against the production build on the real Worker (`wrangler dev`), 22 tests per engine:
+- `tests/e2e`: Playwright against the production build on the real Worker (`wrangler dev`), 22 tests per engine at this checkpoint:
   package install and boot, keyboard, drawn keys with the mouse, reload resume, files, screenshot and GIF, export and
   import, new device and dialogs, links, proxy refusals, framing headers, `/compat`, `/about`, `/embed` in a frame, phone
   width, axe on `/`, `/compat`, `/about` (WCAG A and AA) in English and Italian, tabs and drawn keys by keyboard.
@@ -651,9 +651,40 @@ once not tested; wasm CPU benchmark still below its M0 figure.
   IndexedDB worked (it now tries OPFS, IndexedDB, memory; WebKit's run covers the IndexedDB backend, including a reload and an
   import); the first render overflowed phones until the first resize; the `ResizeObserver` updated even with nothing to
   change, which WebKit reports as an error; `<html lang>` stayed `en` over Italian text.
-- The `RangeError` of checkpoint 3b did not appear in any run on the production build. It has only been seen on the dev server.
+- The `RangeError` of checkpoint 3b did not appear in any run on the production build. Those runs could not have seen it if it was raised in the worker: see "On production" below.
 - **Not tested:** a screen reader; OPFS in WebKit (its test contexts refuse it); Mobile Safari and Chrome on real phones;
   fullscreen; Real OTA in the suite (`core/tests/ota_official.rs` covers the core). Touch targets at 2×, computed from the
   models: 48–50 px on the pad, 44–56 px for Back.
 - **Definition of done:** the E2E part depends on Firefox in CI. "Hub 'Try in emulator' link works" cannot be checked from this
   repository: `/?fw=`, the badge and `/embed` are ready, and the maintainer is connecting the link.
+
+### On production
+
+Merged through PR #5. The merge's first run on main failed on the WebKit `style-src-attr` flake, so `deploy` was
+skipped; the re-run passed and deployed `c31a952`. The flake's fix is PR #6.
+
+Checked against https://app.dryflash.workers.dev, 2026-11-01:
+
+- Official 1.5.1 through `?fw=` (fetched directly, no proxy) goes on the "From a link" device and boots to the "No Factory
+  Keys Found" popup; after a reload the saved device boots again. Chromium and WebKit installed the same package from a file and booted it.
+- `/`, `/compat`, `/about`, `/embed` load with no page errors, 8 cold loads each on Chromium and WebKit for `/`; WebKit shows
+  only the known stylesheet CSP reports. `/embed` alone has `frame-ancestors *`.
+- A proxy request for a host outside the allowlist gets 403.
+- **Not checked on production:** a successful download through the proxy (done on the pr-5 preview, with an identical
+  SHA-256 and a cache hit on the second download); Firefox (CI only); the Hub's link.
+
+**The `RangeError` reached production.** `Invalid typed array length: 144115188075855870` appeared once in the desktop app's
+browser pane, on the first production load in a tab that had been running a firmware from the dev server. That rules out the guess
+of a stale `.js`/`.wasm` pair: production's assets are hashed. It did not come back in about 7 more loads in a new pane, including a
+firmware running and then navigating away. The cause is **not known**. The page was still on "Loading" 4 s into that load, while
+loads usually take under a second, and it was not looked at again before the next navigation, so it may have been stuck.
+
+What it did show is a gap: exceptions in the worker reached nothing. `start()` runs with no handler, so a failed start left
+"Loading" on screen with no message, and Playwright's `pageerror` does not report workers, so "every test fails on an uncaught
+error" did not cover them. The worker now reports uncaught exceptions; the page logs them with their stack (`dryflash worker:` in the
+console) and shows them, and the embed API passes them on as `error`. A new test blocks the `.wasm` and expects the alert and the console
+line, and it fails without the change. This does not fix the `RangeError`: if it comes back, it now has a stack and fails the suite.
+
+Result here: **46 of 46 on Chromium and WebKit** (23 tests per engine).
+
+**M5 is not closed:** the Hub's "Try in emulator" link is still to be confirmed by the maintainer.

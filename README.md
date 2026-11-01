@@ -6,9 +6,10 @@ Try any Flipper Zero firmware before flashing it to your real device: dryflash e
 real, unmodified release binaries (`.dfu` / update `.tgz`) on an instruction-level model of the
 STM32WB55, with no backend and no hardware.
 
-> **Status: pre-alpha (milestone M4).** Try it at **https://app.dryflash.workers.dev**: drop a
-> firmware `.tgz` or `.dfu` on the page. Firmwares boot to the Desktop with a virtual SD card saved in
-> your browser, apps run from the card, and a package can be installed by the firmware's own updater.
+> **Status: pre-alpha (milestone M5).** Try it at **https://app.dryflash.workers.dev**: drop a
+> firmware `.tgz` or `.dfu` on the page, or open a link with `?fw=<url>`. Firmwares boot to the Desktop on
+> virtual devices saved in your browser, apps run from the card, and a package can be installed by the
+> firmware's own updater. It can be embedded in other pages ([docs/EMBED.md](docs/EMBED.md)).
 > No Bluetooth and no radio stack. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it is — and what it is not
@@ -26,7 +27,7 @@ on hardware.
 | `core-wasm/` | WebAssembly bindings |
 | `runner/` | Headless Node CLI (`npx dryflash run …`) — M6 |
 | `web/` | Static web app (Vite + Preact) |
-| `proxy/` | Allowlisted CORS proxy (Cloudflare Worker) — M5 |
+| `proxy/` | Allowlisted CORS proxy (Cloudflare Worker) |
 | `action/` | GitHub Action — M6 |
 | `firmware/compat.json` | Pinned firmware packages (URLs + hashes; binaries are never committed) |
 | `tests/` | Integration tests and the CPU benchmark |

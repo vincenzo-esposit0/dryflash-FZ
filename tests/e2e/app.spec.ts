@@ -40,6 +40,19 @@ const test = base.extend<{ errorWatch: void }>({
   ],
 });
 
+// Without the watcher above: this failure is the point. Worker exceptions never reach Playwright's `pageerror`,
+// so the watcher only sees them through what the page does here.
+base("an exception in the worker reaches the page and its console", async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") errors.push(m.text());
+  });
+  await context.route("**/*.wasm", (route) => route.abort());
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText("Error:");
+  expect(errors.filter((e) => e.startsWith("dryflash worker:"))).toHaveLength(1);
+});
+
 async function install(page: Page) {
   await page.goto("/");
   await expect(page.getByText("Drop a firmware")).toBeVisible();

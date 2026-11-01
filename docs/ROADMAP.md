@@ -77,7 +77,7 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 - ☑ Virtual devices: flash, option bytes, card and settings per device; export/import, factory reset
 - ☑ Full layout (BRIEF §9): toolbar, SD file manager, crash report, events
 - ☑ Screenshot, GIF/WebM recording
-- ☑ `?fw=` / `?elf=` / `mode` / `autoboot` / `device` URL loading + `/proxy` (live with the next deploy)
+- ☑ `?fw=` / `?elf=` / `mode` / `autoboot` / `device` URL loading + `/proxy`
 - ☑ `/embed` + embed API + `docs/EMBED.md` + "Try in browser" badge; `/compat` (by hand until M6) and `/about`
 - ☑ Pixel-art device modelled on the real one, tabs modelled on qFlipper's use (ADR-0015)
 - ☑ i18n (en, it), accessibility pass (axe: WCAG A and AA), keyboard use
