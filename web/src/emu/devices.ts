@@ -213,9 +213,14 @@ class OpfsBackend implements DeviceBackend {
       (await (await dir.getFileHandle(name, { create: true })).createSyncAccessHandle()) as unknown as SyncFile;
     const idx = await handle("sd.idx");
     this.open.push(idx);
-    const dat = await handle("sd.dat");
-    this.open.push(dat);
-    return new SlotStore(idx, dat);
+    try {
+      const dat = await handle("sd.dat");
+      this.open.push(dat);
+      return new SlotStore(idx, dat);
+    } catch (err) {
+      this.closeCard(); // a retry must not find its own lock on sd.idx
+      throw err;
+    }
   }
 
   async read(id: string, blob: Blob) {

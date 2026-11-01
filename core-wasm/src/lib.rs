@@ -5,7 +5,7 @@
 
 use dryflash_core::board::bq25896::Bq25896;
 use dryflash_core::board::bq27220::Bq27220;
-use dryflash_core::board::fat32;
+use dryflash_core::board::fat32::{self, Volume};
 use dryflash_core::board::otp::BoardInfo;
 use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
 use dryflash_core::board::{Battery, Button};
@@ -214,6 +214,65 @@ impl Emulator {
             card.store.read(lba, &mut r[4..]);
         }
         out
+    }
+
+    fn card_volume(&mut self) -> Result<Volume<'_>, String> {
+        let card = self.m.bus.periphs.sd.as_mut().ok_or("no card")?;
+        Volume::open(&mut card.store).map_err(|e| e.to_string())
+    }
+
+    /// Entries of a card directory as JSON `[{"name", "dir", "size"}]`, directories first. The
+    /// firmware may have changes it has not written yet: this is the card as it is now.
+    pub fn sd_list(&mut self, path: &str) -> Result<String, String> {
+        let v = self.card_volume()?;
+        let dir = match v.lookup(path).map_err(|e| e.to_string())? {
+            Some(e) if e.is_dir => e.cluster,
+            Some(_) => return Err(format!("{path}: not a directory")),
+            None if path.trim_matches('/').is_empty() => v.root(),
+            None => return Err(format!("{path}: not found")),
+        };
+        let mut entries = v.list_dir(dir);
+        entries.sort_by_key(|e| (!e.is_dir, e.name.to_lowercase()));
+        let rows: Vec<String> = entries
+            .iter()
+            .map(|e| {
+                format!(
+                    "{{\"name\":{},\"dir\":{},\"size\":{}}}",
+                    json_str(&e.name),
+                    e.is_dir,
+                    e.size
+                )
+            })
+            .collect();
+        Ok(format!("[{}]", rows.join(",")))
+    }
+
+    pub fn sd_read(&mut self, path: &str) -> Result<Vec<u8>, String> {
+        self.card_volume()?.read_file(path).map_err(|e| e.to_string())
+    }
+
+    /// Writes a file on the card. The firmware must not be running: FatFs keeps state in RAM, and
+    /// the host restarts the device afterwards so that it mounts the changed card.
+    pub fn sd_write(&mut self, path: &str, data: &[u8]) -> Result<(), String> {
+        let mut v = self.card_volume()?;
+        v.write_file(path, data).map_err(|e| e.to_string())?;
+        v.sync();
+        Ok(())
+    }
+
+    pub fn sd_mkdir(&mut self, path: &str) -> Result<(), String> {
+        let mut v = self.card_volume()?;
+        v.mkdir_all(path).map_err(|e| e.to_string())?;
+        v.sync();
+        Ok(())
+    }
+
+    /// Removes a file or a whole directory. Same condition as `sd_write`.
+    pub fn sd_remove(&mut self, path: &str) -> Result<(), String> {
+        let mut v = self.card_volume()?;
+        v.remove(path).map_err(|e| e.to_string())?;
+        v.sync();
+        Ok(())
     }
 
     /// Bytes in use on the card (non-zero blocks).
@@ -427,6 +486,11 @@ impl Emulator {
         format!("[{}]", rows.join(","))
     }
 
+    /// Number of firmware crashes recorded since power-on.
+    pub fn crash_count(&self) -> u32 {
+        self.m.crashes.len() as u32
+    }
+
     /// Firmware crashes decoded from Furi's records, as JSON `[{"atMs", "message"}]`.
     pub fn crashes_json(&self) -> String {
         let rows: Vec<String> = self
@@ -516,6 +580,27 @@ mod tests {
         assert_eq!(uid, 0x77);
         let g = m.bus.periphs.i2c[0].device_mut::<Bq27220>().unwrap();
         assert_eq!((g.battery.state_of_charge, g.battery.charging), (42, true));
+    }
+
+    #[test]
+    fn card_files_from_the_host() {
+        let mut e = Emulator::new();
+        e.sd_restore(&[]);
+        e.sd_write("/nfc/my tag.nfc", b"data").unwrap();
+        e.sd_mkdir("/empty").unwrap();
+        assert_eq!(e.sd_read("nfc/my tag.nfc").unwrap(), b"data");
+        let root = e.sd_list("/").unwrap();
+        assert_eq!(
+            root,
+            r#"[{"name":"empty","dir":true,"size":0},{"name":"nfc","dir":true,"size":0}]"#
+        );
+        assert_eq!(
+            e.sd_list("/nfc").unwrap(),
+            r#"[{"name":"my tag.nfc","dir":false,"size":4}]"#
+        );
+        e.sd_remove("/nfc").unwrap();
+        assert!(e.sd_read("nfc/my tag.nfc").is_err());
+        assert!(e.sd_list("/missing").is_err());
     }
 
     #[test]

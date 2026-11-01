@@ -27,3 +27,36 @@ export function paint(bits: Uint8Array, backlight: number, rgba: Uint8ClampedArr
     rgba[o + 3] = 255;
   }
 }
+
+/**
+ * Slow liquid-crystal response for the optional ghosting effect: `ink` is each pixel's darkness
+ * (0–1), moved towards the frame by `rate`. Returns true while pixels are still settling.
+ */
+export function ghostStep(bits: Uint8Array, ink: Float32Array, rate: number): boolean {
+  let moving = false;
+  for (let i = 0; i < ink.length; i++) {
+    const target = (bits[i >> 3] >> (7 - (i & 7))) & 1;
+    const next = ink[i] + (target - ink[i]) * rate;
+    if (Math.abs(target - next) < 0.02) ink[i] = target;
+    else {
+      ink[i] = next;
+      moving = true;
+    }
+  }
+  return moving;
+}
+
+/** Paints `ink` darkness values instead of bits. */
+export function paintInk(ink: Float32Array, backlight: number, rgba: Uint8ClampedArray): void {
+  const bg = glass(backlight);
+  for (let i = 0; i < ink.length; i++) {
+    const k = ink[i];
+    const o = i * 4;
+    rgba[o] = bg[0] + (INK[0] - bg[0]) * k;
+    rgba[o + 1] = bg[1] + (INK[1] - bg[1]) * k;
+    rgba[o + 2] = bg[2] + (INK[2] - bg[2]) * k;
+    rgba[o + 3] = 255;
+  }
+}
+
+export const inkColour = INK as unknown as [number, number, number];

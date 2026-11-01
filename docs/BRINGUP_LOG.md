@@ -572,3 +572,26 @@ once not tested; wasm CPU benchmark still below its M0 figure.
   and card; delete removes the folder; factory reset empties the device. Not tested in a browser: the
   IndexedDB backend, a device open in two tabs, and the firmware actually showing changed settings
   (unit tests check they reach the OTP, UID and battery models).
+
+### Checkpoint 2 — device, panels, file manager, recording
+
+- Layout: an original device drawing (SVG shell, its own proportions, no Flipper Devices artwork) with
+  the real canvas and buttons on top; the LCD is always a whole multiple of 128×64. Collapsible panels:
+  firmware, devices, card, crash report, events, log, fidelity.
+- SD file manager: browse, upload, download, new folder, delete, erase. **Changes restart the device**:
+  FatFs keeps state in RAM, so the card must not change under a running firmware, and restarting makes
+  it mount the new contents. Reading while it runs shows the card as it is at that moment.
+- Screenshot (PNG, 4×), video (WebM with VP9 where available, MP4 otherwise; from a 4× canvas), GIF (own
+  LZW encoder, 2× scale, stops after 30 s), fullscreen, optional LCD ghosting.
+- Crash report panel: Furi's decoded records as they happen, not only when the emulator stops.
+- **Bugs found:** `prompt()` throws in the desktop app's browser and is blocked in sandboxed iframes, so
+  questions are now a `<dialog>` in the page. After a quick reload the old worker can still hold the OPFS
+  locks, and the page silently fell back to an unsaved card: opening is retried for 3 seconds. An
+  on-screen key with focus swallowed the arrow keys: it now passes them on.
+- Verified in a browser (dev server): upload → the firmware boots again and the card still mounts →
+  download gives the same bytes → delete; PNG is 512×256; the browser's own decoder accepts the GIF
+  (256×128); a WebM comes out; 375 px layout has no horizontal scroll. LZW is also tested against a
+  standard decoder, past the 4096-code table reset.
+- **Not done or not tested:** fullscreen and ghosting were only exercised without looking at the result;
+  bottom sheets on mobile (panels collapse instead); Mute (no audio before M7); Reboot to DFU (not
+  modelled); Gamepad API (stretch). Firefox and WebKit come with the E2E suite in checkpoint 4.

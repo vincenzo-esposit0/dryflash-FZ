@@ -75,8 +75,8 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 ## M5 — Web app complete
 
 - ☑ Virtual devices: flash, option bytes, card and settings per device; export/import, factory reset
-- ☐ Full layout and panels (BRIEF §9)
-- ☐ Screenshot, GIF/WebM recording
+- ☑ Full layout and panels (BRIEF §9): original device illustration, toolbar, SD file manager, crash report, events
+- ☑ Screenshot, GIF/WebM recording
 - ☐ `?fw=` / `?elf=` / `mode` / `autoboot` / `device` URL loading + `/proxy` deployed
 - ☐ `/embed` + embed API + `docs/EMBED.md` + "Try in browser" badge
 - ☐ i18n (en, it), accessibility pass, reduced motion

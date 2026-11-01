@@ -20,6 +20,8 @@ const post = (m: FromWorker, transfer: Transferable[] = []) => ctx.postMessage(m
 
 /** How often written card blocks are saved (ms of wall time). */
 const FLUSH_MS = 1000;
+/** Attempts 250 ms apart: about 3 seconds. */
+const CARD_OPEN_RETRIES = 12;
 
 let emu: Emulator | null = null;
 let card: CardStore | null = null;
@@ -38,6 +40,7 @@ const pacer = new Pacer();
 const presses = new PressTimer();
 let lastGeneration = -1;
 let lastLights = "";
+let lastCrashes = 0;
 let report = { wall: 0, virtualMs: 0, instructions: 0 };
 
 // With work pending the next slice comes through a message port: timers wait at least 4 ms when
@@ -118,6 +121,10 @@ function publish(force: boolean) {
     const bytes = log.slice().buffer;
     post({ type: "log", bytes }, [bytes]);
   }
+  if (e.crash_count() !== lastCrashes) {
+    lastCrashes = e.crash_count();
+    post({ type: "crashes", crashes: JSON.parse(e.crashes_json()) });
+  }
   const now = performance.now();
   if (now - lastFlush >= FLUSH_MS) void flushCard();
   if (force || now - report.wall >= 250) {
@@ -180,6 +187,25 @@ async function reportDevices() {
   });
 }
 
+/**
+ * Opens a device's card. Right after a reload the old page's worker can still hold the file locks
+ * for a moment, so a refusal is retried. If another tab really holds them, the device runs from
+ * memory and the page says so.
+ */
+async function openCardRetrying(id: string): Promise<CardStore> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await devices!.openCard(id);
+    } catch (err) {
+      if (attempt >= CARD_OPEN_RETRIES) {
+        console.warn("card not available", err);
+        return new MemoryOnlyStore();
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+}
+
 /** Stops the current device and brings up `d`: its card, its flash and, if it has one, its firmware. */
 async function activate(d: DeviceMeta) {
   running = false;
@@ -188,8 +214,7 @@ async function activate(d: DeviceMeta) {
   emu = null;
   e?.free();
   device = d;
-  // Another tab may hold this device's card: then it runs from memory, and the page says so.
-  card = await devices!.openCard(d.id).catch(() => new MemoryOnlyStore());
+  card = await openCardRetrying(d.id);
   const next = new Emulator();
   applySettings(next, d);
   next.sd_restore(await card.load());
@@ -213,6 +238,29 @@ async function activate(d: DeviceMeta) {
   queueMicrotask(drainWaiting);
 }
 
+/**
+ * Changes files on the card from outside the firmware, which must not be running: its FatFs keeps
+ * state in RAM. It stops, the change is made, and it starts again to mount the changed card.
+ */
+function changeCard(what: string, dir: string, change: () => void) {
+  void flushCard();
+  running = false;
+  queue(what, async () => {
+    try {
+      change();
+    } finally {
+      void flushCard();
+      listCard(dir);
+      await reportDevices();
+      if (loaded) powerOn();
+    }
+  });
+}
+
+function listCard(path: string) {
+  post({ type: "sdListing", path, entries: JSON.parse(emu!.sd_list(path)) });
+}
+
 /** Saves the active device's description, and tells the UI. */
 async function saveDevice(changes: Partial<DeviceMeta>) {
   device = { ...device!, ...changes };
@@ -226,6 +274,8 @@ function powerOn() {
   e.power_on();
   lastGeneration = -1;
   lastLights = "";
+  lastCrashes = 0;
+  post({ type: "crashes", crashes: [] });
   report = { wall: 0, virtualMs: 0, instructions: 0 };
   running = true;
   restartPacing();
@@ -368,6 +418,32 @@ function handle(m: ToWorker) {
           await activate({ ...newDevice(d.label, d.id, d.uid) });
         });
         break;
+      case "sdList":
+        listCard(m.path);
+        break;
+      case "sdRead": {
+        const bytes = emu.sd_read(m.path).slice().buffer;
+        post({ type: "sdFile", name: m.path.split("/").pop()!, bytes }, [bytes]);
+        break;
+      }
+      case "sdWrite": {
+        const e = emu;
+        changeCard("writing to the card", m.dir, () => {
+          for (const f of m.files) e.sd_write(`${m.dir}/${f.name}`, new Uint8Array(f.bytes));
+        });
+        break;
+      }
+      case "sdMkdir": {
+        const e = emu;
+        const dir = m.path.slice(0, m.path.lastIndexOf("/")) || "/";
+        changeCard("creating the folder", dir, () => e.sd_mkdir(m.path));
+        break;
+      }
+      case "sdRemove": {
+        const e = emu;
+        changeCard("deleting from the card", m.dir, () => e.sd_remove(m.path));
+        break;
+      }
       case "exportDevice":
         void flushCard();
         queue("exporting the device", async () => {
