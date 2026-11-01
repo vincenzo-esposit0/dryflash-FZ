@@ -3,8 +3,9 @@
 // transferable ArrayBuffers only; no SharedArrayBuffer.
 
 import type { Persistence } from "./cardstore";
+import type { BatterySettings, BoardSettings, DeviceMeta } from "./devices";
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Button indices understood by the core (core-wasm `set_button`). */
 export const BUTTONS = ["up", "down", "left", "right", "ok", "back"] as const;
@@ -29,7 +30,15 @@ export type ToWorker =
   | { type: "button"; button: ButtonName; down: boolean }
   | { type: "control"; action: "pause" | "resume" | "reset" }
   | { type: "turbo"; on: boolean }
-  | { type: "settings"; legacySleep: boolean };
+  /** Changes to the active device; board and sleep settings apply at the next power cycle. */
+  | { type: "settings"; legacySleep?: boolean; board?: BoardSettings; battery?: BatterySettings }
+  | { type: "selectDevice"; id: string }
+  | { type: "createDevice"; label: string }
+  | { type: "renameDevice"; label: string }
+  | { type: "deleteDevice" }
+  | { type: "factoryReset" }
+  | { type: "exportDevice" }
+  | { type: "importDevice"; bytes: ArrayBuffer };
 
 export interface Status {
   running: boolean;
@@ -48,10 +57,18 @@ export type FromWorker =
       version: string;
       protocol: number;
       fidelity: FidelityRow[];
+    }
+  /** The devices and the active one, after any change. `running`: a firmware is installed on it. */
+  | {
+      type: "devices";
+      devices: DeviceMeta[];
+      active: DeviceMeta;
       persistence: Persistence;
+      hasFirmware: boolean;
       cardCapacityBytes: number;
       cardUsedBytes: number;
     }
+  | { type: "exported"; name: string; bytes: ArrayBuffer }
   /** `packageInfo` for an update package: its version and the files put on the card. */
   | { type: "loaded"; name: string; packageInfo?: { info: string; files: number } }
   | { type: "otaStarted"; name: string; info: string }

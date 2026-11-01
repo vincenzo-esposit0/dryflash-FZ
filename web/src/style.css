@@ -53,3 +53,8 @@ th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #222; vert
 .lvl.partial { color: #ffb224; }
 .lvl.simulated { color: #52a9ff; }
 .lvl.stubbed { color: #e5484d; }
+select, input[type="text"] { font: 0.9rem var(--mono); background: #222; color: var(--fg); border: 1px solid #3a3a3a; border-radius: 6px; padding: 4px 8px; }
+.file-button { font: 0.9rem var(--mono); background: #222; border: 1px solid #3a3a3a; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.file-button input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }

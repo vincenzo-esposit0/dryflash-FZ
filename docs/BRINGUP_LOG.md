@@ -550,3 +550,25 @@ Known limits at the end of M4: no Bluetooth and no factory keys (ADR-0012); radi
 not tested (ADR-0014); only the card persists, the firmware is loaded again after a reload (M5);
 OTA of Momentum and RogueMaster, the option-byte repair path, the IndexedDB fallback and two tabs at
 once not tested; wasm CPU benchmark still below its M0 figure.
+
+## M5 — Web app complete
+
+### Checkpoint 1 — virtual devices
+
+- `web/src/emu/devices.ts`: each device has its flash image, option bytes, card and settings, in
+  OPFS (`devices/<id>/`), IndexedDB where sync handles are missing, memory if neither opens. The
+  folder of the version before profiles becomes "Device 1" with its card intact.
+- **A reload now resumes the device:** its flash is restored and the firmware starts by itself. Flash
+  is saved when installed and whenever the core reports writes, so an update persists too.
+- Export/import: one gzip file (`.dryflash`) with settings, flash, option bytes and card blocks.
+  Importing always creates a new device. Factory reset wipes firmware, card and settings, keeping the
+  label and the device's ID.
+- Settings per device: OTP name, region and colour, UID64 (random per device), Sleep method, simulated
+  battery (charge, charging, USB).
+- Worker: `ready` now follows the device being up, and messages arriving during a switch wait instead
+  of being dropped (a file dropped right after page load used to be lost).
+- Verified in a browser (dev server, OPFS): install; reload resumes 1.5.1 with its card; a second
+  device starts empty and the first keeps its firmware; export (6.1 MB) and import give identical flash
+  and card; delete removes the folder; factory reset empties the device. Not tested in a browser: the
+  IndexedDB backend, a device open in two tabs, and the firmware actually showing changed settings
+  (unit tests check they reach the OTP, UID and battery models).
