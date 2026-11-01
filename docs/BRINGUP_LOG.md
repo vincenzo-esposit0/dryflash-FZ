@@ -391,7 +391,7 @@ Not enabled by firmware 1.5.1: no IWDG register is accessed in 60 s virtual from
 tool digest, Desktop idle); it stays register file only and is listed as such in the fidelity table. To be
 modelled when a firmware starts it.
 
-### Checkpoint 3 — deployment prepared (not live yet)
+### Checkpoint 3 — deployment
 
 - `proxy/wrangler.jsonc`: Worker `app`, static assets from `web/dist`, `workers.dev` and preview
   URLs on; wrangler 4.156.0 pinned in the `proxy` workspace.
@@ -407,3 +407,24 @@ modelled when a firmware starts it.
   upload` refuses a Worker that does not exist yet. Only `wrangler deploy` creates it, and that
   publishes production, reserved for `main`. The preview step now reports this one case as a
   warning; PR #1 therefore has no preview, and the first live check is production after merge.
+
+### M3 closed
+
+- Live: **https://app.dryflash.workers.dev** (first deploy from `5263cf1`, version
+  `ae064fe7-e3b2-40fd-b6cd-18d8c870173b`).
+- Checked on the live site from the built-in browser: HTTP 200, CSP and other headers present, no
+  COOP/COEP, wasm core initialised under the CSP (fidelity table filled), no console errors.
+- The built-in browser cannot drop files, so the firmware itself was run on the live site by the
+  maintainer: official 1.5.1 `firmware.dfu` dropped on the page, popup, Desktop and menu navigation
+  with the keyboard work. Definition of done met.
+- Not exercised yet: pull request previews (PR #1 predates the Worker; the path runs for the first
+  time on the next pull request).
+
+Known limits at the end of M3: no SD card or `.tgz` (M4), no Bluetooth and no factory keys
+(ADR-0012), wasm CPU benchmark at 137 MIPS vs 158 in M0.
+
+### Demo
+
+Open https://app.dryflash.workers.dev and drop a `firmware.dfu` on the page (official update
+package, after `node scripts/fetch-firmware.mjs official`:
+`firmware/cache/official/f7-update-1.5.1/firmware.dfu`). Esc closes the popup, Enter opens the menu.
