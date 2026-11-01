@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { render } from "preact";
 import { App } from "./app";
+import { detectLocale } from "./i18n";
 import { AboutPage, CompatPage } from "./pages";
 import "./style.css";
+
+document.documentElement.lang = detectLocale(navigator.languages ?? [navigator.language]);
 
 function route(path: string) {
   switch (path.replace(/\/+$/, "")) {

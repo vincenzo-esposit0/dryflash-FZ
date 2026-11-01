@@ -635,3 +635,25 @@ once not tested; wasm CPU benchmark still below its M0 figure.
   starting the dev server with a wasm rebuilt since the last one (now "in promise"). Fast navigation and
   reloads did not produce it, and the page worked normally afterwards. Still only the stale `.js`/`.wasm`
   guess: cause not proven. The E2E suite runs on the production build and fails on console errors.
+
+### Checkpoint 4 — accessibility and end-to-end tests
+
+- `tests/e2e`: Playwright against the production build on the real Worker (`wrangler dev`), 22 tests per engine:
+  package install and boot, keyboard, drawn keys with the mouse, reload resume, files, screenshot and GIF, export and
+  import, new device and dialogs, links, proxy refusals, framing headers, `/compat`, `/about`, `/embed` in a frame, phone
+  width, axe on `/`, `/compat`, `/about` (WCAG A and AA) in English and Italian, tabs and drawn keys by keyboard.
+- **Every test fails on an uncaught error, a console error or a CSP violation.** One exception, by the violation's own
+  details: WebKit reports `style-src-attr` for the internals of a `<select>`, with no effect on rendering. The CSP was not
+  relaxed.
+- Result here: **44 of 44 on Chromium and WebKit.** Playwright's Firefox does not start on macOS 27 ("Could not find profile
+  folder", from the binary alone), so Firefox runs in the CI job `e2e`, on which `deploy` now depends.
+- Bugs these tests found: in private modes where OPFS is refused the page went straight to an unsaved device though
+  IndexedDB worked (it now tries OPFS, IndexedDB, memory; WebKit's run covers the IndexedDB backend, including a reload and an
+  import); the first render overflowed phones until the first resize; the `ResizeObserver` updated even with nothing to
+  change, which WebKit reports as an error; `<html lang>` stayed `en` over Italian text.
+- The `RangeError` of checkpoint 3b did not appear in any run on the production build. It has only been seen on the dev server.
+- **Not tested:** a screen reader; OPFS in WebKit (its test contexts refuse it); Mobile Safari and Chrome on real phones;
+  fullscreen; Real OTA in the suite (`core/tests/ota_official.rs` covers the core). Touch targets at 2×, computed from the
+  models: 48–50 px on the pad, 44–56 px for Back.
+- **Definition of done:** the E2E part depends on Firefox in CI. "Hub 'Try in emulator' link works" cannot be checked from this
+  repository: `/?fw=`, the badge and `/embed` are ready, and the maintainer is connecting the link.
