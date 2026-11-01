@@ -1,13 +1,12 @@
 {
   "tagline": "Prova qualsiasi firmware per Flipper Zero nel browser prima di installarlo sul tuo dispositivo.",
-  "status": "Pre-alpha (milestone M3). Il firmware reale viene eseguito istruzione per istruzione; la tabella di fedeltà hardware indica cosa è emulato, simulato o assente.",
+  "status": "Pre-alpha (milestone M4). Il firmware reale viene eseguito istruzione per istruzione; la tabella di fedeltà hardware indica cosa è emulato, simulato o assente.",
   "positioning": "dryflash è uno smoke test, non una certificazione hardware. Rileva mancati avvii, crash, fault, blocchi e flussi UI rotti. Non riproduce RF reale, fisica NFC/RFID, BLE, consumi o temporizzazioni esatte. Superare il test nell'emulatore non garantisce il funzionamento sull'hardware.",
   "disclaimer": "Non affiliato né approvato da Flipper Devices Inc. Flipper Zero è un marchio del rispettivo proprietario. Solo per scopi educativi e ricerca di sicurezza autorizzata.",
   "source": "Codice sorgente (GPL-3.0-or-later)",
-  "drop": "Trascina qui un firmware .dfu",
-  "choose": "Scegli un file .dfu",
+  "drop": "Trascina qui un firmware .tgz o .dfu",
+  "choose": "Scegli un file",
   "privacy": "Il file resta nel tuo browser: non viene caricato da nessuna parte.",
-  "tgzLater": "I pacchetti di aggiornamento (.tgz) sono supportati dalla milestone M4. Per ora estrai firmware.dfu dal pacchetto.",
   "starting": "Caricamento dell'emulatore…",
   "noFirmware": "Nessun firmware caricato.",
   "running": "In esecuzione",
@@ -40,5 +39,13 @@
   "stopped": "Emulazione fermata",
   "crashes": "Crash del firmware",
   "digest": "Digest di bring-up",
-  "error": "Errore"
+  "error": "Errore",
+  "installed": "Installazione rapida: {files} file del pacchetto {info} messi sulla scheda.",
+  "card": "Scheda SD",
+  "cardUsage": "{used} MB usati su {total} MB.",
+  "persist_opfs": "Salvata in questo browser.",
+  "persist_indexeddb": "Salvata in questo browser (IndexedDB).",
+  "persist_none": "Non salvata: si perde chiudendo questa pagina. Forse un'altra scheda del browser la sta usando, oppure il browser blocca lo storage.",
+  "eraseCard": "Cancella la scheda",
+  "eraseConfirm": "Cancellare tutta la scheda SD virtuale? Tutto il contenuto va perso, comprese le impostazioni salvate del dispositivo. Il dispositivo si riavvia."
 }

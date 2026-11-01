@@ -18,7 +18,7 @@ and real usage of a card is far smaller than its capacity.
 - `core/src/board/sdcard.rs` holds a **sparse block store** in memory: unwritten and all-zero blocks
   read as zero and take no memory. The default virtual card is **1 GiB**.
 - The host loads the stored blocks at start and persists `take_dirty()` blocks between slices
-  (OPFS, IndexedDB fallback; checkpoint 3 of M4). The core never calls out.
+  (OPFS, IndexedDB fallback: `web/src/emu/cardstore.ts`). The core never calls out.
 - A new card is prepared by `core/src/board/fat32.rs`: MBR, one FAT32 partition at 1 MiB, 4 KiB
   clusters, like a real card, so the firmware's own FatFs mounts it and an exported image opens on
   a PC. No formatting step is asked of the user.

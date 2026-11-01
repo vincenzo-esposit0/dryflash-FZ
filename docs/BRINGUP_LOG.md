@@ -471,3 +471,23 @@ The custom firmwares were only booted to the Desktop's animations; their apps we
   reports what the device lacks: "Unable to load decryption key" (no enclave keys), external
   CC1101 "Init failed".
 - With resources the Desktop plays a real animation (`L1_Waves_128x50`) instead of `L1_NoSd`.
+
+### Checkpoint 3 — card and packages in the web app
+
+- The page takes `.tgz` and `.dfu`, told apart by content. A package does a quick install and the
+  page says how many files went on the card. A card is always inserted: new and empty on the first
+  visit, otherwise the saved one. "Erase card" asks first, then replaces it and restarts the device.
+- `web/src/emu/cardstore.ts`: blocks saved about once a second and when the page is hidden. OPFS
+  with sync access handles (`devices/default/sd.idx` + `sd.dat`), IndexedDB where they are missing.
+  If neither opens (for instance another tab holds the card) the page says the card is **not saved**.
+  Only the card persists: the firmware has to be loaded again after a reload (profiles are M5).
+- Bugs found while wiring this up: loading a firmware reset the Sleep-method setting and would have
+  dropped the card; a rejected image now leaves the running machine alone.
+- **Slices no longer depend on timers.** With the pane hidden the emulator ran at 0.06× (Chromium
+  throttles timers of background pages). Pending work now continues through a `MessageChannel`,
+  which also removes the 4 ms pause per slice that nested `setTimeout(0)` imposed on Turbo.
+- Verified in a browser (dev server, official package, OPFS): quick install of 1074 files, 3.1 MB on
+  the card. After reloading with only the bare `.dfu`, the Dolphin state is found again and
+  `L1_Waves_128x50` plays from the saved resources. After "Erase card": a new card, no saved state,
+  `L0_NoDb_128x51`. Not tested in a browser: the IndexedDB fallback, and two tabs at once.
+- wasm size with the package code: 454 KB.
