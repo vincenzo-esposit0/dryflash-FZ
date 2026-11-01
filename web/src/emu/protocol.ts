@@ -17,6 +17,12 @@ export interface FidelityRow {
   note: string;
 }
 
+export interface CardEntry {
+  name: string;
+  dir: boolean;
+  size: number;
+}
+
 export interface CrashRecord {
   atMs: number;
   message: string;
@@ -38,6 +44,12 @@ export type ToWorker =
   | { type: "deleteDevice" }
   | { type: "factoryReset" }
   | { type: "exportDevice" }
+  /** Card files. Reading works while running; changes restart the device so that it remounts. */
+  | { type: "sdList"; path: string }
+  | { type: "sdRead"; path: string }
+  | { type: "sdWrite"; dir: string; files: { name: string; bytes: ArrayBuffer }[] }
+  | { type: "sdMkdir"; path: string }
+  | { type: "sdRemove"; path: string; dir: string }
   | { type: "importDevice"; bytes: ArrayBuffer };
 
 export interface Status {
@@ -69,6 +81,10 @@ export type FromWorker =
       cardUsedBytes: number;
     }
   | { type: "exported"; name: string; bytes: ArrayBuffer }
+  | { type: "sdListing"; path: string; entries: CardEntry[] }
+  | { type: "sdFile"; name: string; bytes: ArrayBuffer }
+  /** Firmware crashes recorded since power-on (decoded from Furi's own record). */
+  | { type: "crashes"; crashes: CrashRecord[] }
   /** `packageInfo` for an update package: its version and the files put on the card. */
   | { type: "loaded"; name: string; packageInfo?: { info: string; files: number } }
   | { type: "otaStarted"; name: string; info: string }

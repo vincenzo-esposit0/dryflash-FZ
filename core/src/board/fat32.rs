@@ -630,6 +630,35 @@ impl<'a> Volume<'a> {
         self.free_chain(e.cluster);
     }
 
+    /// Removes a file, or a directory with everything in it. The root cannot be removed.
+    pub fn remove(&mut self, path: &str) -> Result<(), FatError> {
+        let path = path.trim_matches('/');
+        let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+        if name.is_empty() {
+            return Err(FatError::BadName(path.to_string()));
+        }
+        let dir = match self.lookup(parent)? {
+            Some(e) if e.is_dir => e.cluster,
+            Some(_) => return Err(FatError::NotADirectory(parent.to_string())),
+            None if parent.is_empty() => self.root,
+            None => return Err(FatError::NotFound(parent.to_string())),
+        };
+        let entry = self
+            .find(dir, name)
+            .ok_or_else(|| FatError::NotFound(path.to_string()))?;
+        if entry.is_dir {
+            for child in self.list_dir(entry.cluster) {
+                self.remove(&format!("{path}/{}", child.name))?;
+            }
+        }
+        // Listed again: removing children does not move the entry, but its slot must be current.
+        let entry = self
+            .find(dir, name)
+            .ok_or_else(|| FatError::NotFound(path.to_string()))?;
+        self.remove_entry(dir, &entry);
+        Ok(())
+    }
+
     /// Reads a whole file.
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, FatError> {
         let e = self.lookup(path)?.ok_or_else(|| FatError::NotFound(path.to_string()))?;
@@ -763,6 +792,24 @@ mod tests {
         assert_eq!(v.read_file("many/file number 299.txt").unwrap(), b"x");
         let shorts: std::collections::HashSet<_> = (1..=300).map(|n| numbered_sfn("file number 1.txt", n)).collect();
         assert_eq!(shorts.len(), 300, "numbered short names stay distinct");
+    }
+
+    #[test]
+    fn remove_files_and_trees_frees_everything() {
+        let mut s = volume_store();
+        let mut v = Volume::open(&mut s).unwrap();
+        let free = v.free_clusters();
+        v.write_file("keep.txt", b"k").unwrap();
+        v.write_file("tree/a/long file name.bin", &[1; 9000]).unwrap();
+        v.write_file("tree/b.txt", b"b").unwrap();
+        v.remove("tree").unwrap();
+        assert_eq!(v.lookup("tree").unwrap(), None);
+        assert_eq!(free - v.free_clusters(), 1, "only keep.txt is left");
+        v.remove("/keep.txt").unwrap();
+        assert_eq!(v.free_clusters(), free);
+        assert!(v.list_dir(v.root()).is_empty());
+        assert!(matches!(v.remove("missing"), Err(FatError::NotFound(_))));
+        assert!(matches!(v.remove("/"), Err(FatError::BadName(_))));
     }
 
     #[test]

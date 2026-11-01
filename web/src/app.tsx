@@ -1,16 +1,81 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ButtonName, CrashRecord, FidelityRow, FromWorker, Status, ToWorker } from "./emu/protocol";
 import type { Persistence } from "./emu/cardstore";
 import type { DeviceMeta } from "./emu/devices";
+import type {
+  ButtonName,
+  CardEntry,
+  CrashRecord,
+  FidelityRow,
+  FromWorker,
+  Status,
+  ToWorker,
+} from "./emu/protocol";
 import { detectLocale, t, type Key } from "./i18n";
 import { stripAnsi } from "./ui/ansi";
+import { download, formatSize, joinPath, parentPath } from "./ui/download";
+import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
-import { LCD_H, LCD_W, paint } from "./ui/lcd";
+import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
 const locale = detectLocale(navigator.languages ?? [navigator.language]);
 const tr = (k: Key) => t(locale, k);
 const LOG_LIMIT = 64 * 1024;
+const EVENT_LIMIT = 200;
+/** Screenshots and videos: 4× the panel (BRIEF §9). */
+const CAPTURE_SCALE = 4;
+const GIF_SCALE = 2;
+const GIF_MAX_MS = 30_000;
+const GIF_FRAME_MS = 40;
+
+type Send = (m: ToWorker, transfer?: Transferable[]) => void;
+
+/** A question in the page: the browser's own dialogs are blocked in sandboxed frames and some shells. */
+interface Question {
+  message: string;
+  /** Present: asks for text, starting from this value. */
+  input?: string;
+  /** The "yes" button says what is about to happen. */
+  action: string;
+  danger?: boolean;
+  onAnswer: (text: string) => void;
+}
+type Ask = (q: Question) => void;
+
+function AskDialog({ question, close }: { question: Question | null; close: () => void }) {
+  const box = useRef<HTMLDialogElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const d = box.current;
+    if (!d) return;
+    if (question && !d.open) d.showModal();
+    if (!question && d.open) d.close();
+    if (question && field.current) field.current.value = question.input ?? "";
+  }, [question]);
+  const answer = (e: Event) => {
+    e.preventDefault();
+    const text = field.current?.value.trim() ?? "";
+    if (question?.input !== undefined && !text) return;
+    question?.onAnswer(text);
+    close();
+  };
+  return (
+    <dialog ref={box} class="ask" onClose={close}>
+      <form onSubmit={answer}>
+        <p>{question?.message}</p>
+        {question?.input !== undefined && <input ref={field} type="text" aria-label={question.message} />}
+        <div class="controls">
+          <button type="submit" class={question?.danger ? "danger" : ""}>
+            {question?.action}
+          </button>
+          <button type="button" onClick={close}>
+            {tr("cancel")}
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
 
 interface Stop {
   reason: string;
@@ -18,11 +83,55 @@ interface Stop {
   digest: string;
 }
 
-function DeviceSettings({ device, send }: { device: DeviceMeta; send: (m: ToWorker) => void }) {
+/** The dryflash shell: an original drawing, stretched behind the real canvas and buttons. */
+function Shell() {
+  return (
+    <svg class="shell" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <polygon class="body" points="0,0 92,0 100,7 100,100 8,100 0,93" vector-effect="non-scaling-stroke" />
+      <line class="stripe" x1="0" y1="3" x2="90" y2="3" vector-effect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function Keys({ pressed, press, enabled }: { pressed: Set<ButtonName>; press: (b: ButtonName, d: boolean) => void; enabled: boolean }) {
+  const key = (b: ButtonName, label: Key, text: string) => (
+    <button
+      type="button"
+      class={`key ${b}${pressed.has(b) ? " held" : ""}`}
+      data-button={b}
+      aria-label={tr(label)}
+      disabled={!enabled}
+      onPointerDown={(e) => {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        press(b, true);
+      }}
+      onPointerUp={() => press(b, false)}
+      onPointerCancel={() => press(b, false)}
+    >
+      {text}
+    </button>
+  );
+  return (
+    <div class="controls-area">
+      <div class="pad">
+        {key("up", "btnUp", "▲")}
+        {key("left", "btnLeft", "◀")}
+        {key("ok", "btnOk", "OK")}
+        {key("right", "btnRight", "▶")}
+        {key("down", "btnDown", "▼")}
+      </div>
+      {key("back", "btnBack", "↩")}
+    </div>
+  );
+}
+
+function DeviceSettings({ device, send }: { device: DeviceMeta; send: Send }) {
   const board = device.board;
   const battery = device.battery;
   const options = (prefix: "region" | "color", values: number[]) =>
     values.map((v) => <option value={v}>{tr(`${prefix}${v}` as Key)}</option>);
+  const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
+  const checked = (e: Event) => (e.currentTarget as HTMLInputElement).checked;
   return (
     <details>
       <summary>{tr("settings")}</summary>
@@ -36,42 +145,25 @@ function DeviceSettings({ device, send }: { device: DeviceMeta; send: (m: ToWork
             value={board.name}
             onChange={(e) => {
               const input = e.currentTarget as HTMLInputElement;
-              if (input.checkValidity() && input.value) {
-                send({ type: "settings", board: { ...board, name: input.value } });
-              } else input.value = board.name;
+              if (input.checkValidity() && input.value) send({ type: "settings", board: { ...board, name: input.value } });
+              else input.value = board.name;
             }}
           />
         </label>
         <label>
           {tr("region")}{" "}
-          <select
-            value={board.region}
-            onChange={(e) =>
-              send({ type: "settings", board: { ...board, region: +(e.currentTarget as HTMLSelectElement).value } })
-            }
-          >
+          <select value={board.region} onChange={(e) => send({ type: "settings", board: { ...board, region: +value(e) } })}>
             {options("region", [1, 2, 3, 4])}
           </select>
         </label>
         <label>
           {tr("color")}{" "}
-          <select
-            value={board.color}
-            onChange={(e) =>
-              send({ type: "settings", board: { ...board, color: +(e.currentTarget as HTMLSelectElement).value } })
-            }
-          >
+          <select value={board.color} onChange={(e) => send({ type: "settings", board: { ...board, color: +value(e) } })}>
             {options("color", [1, 2, 3])}
           </select>
         </label>
         <label>
-          <input
-            type="checkbox"
-            checked={device.legacySleep}
-            onChange={(e) =>
-              send({ type: "settings", legacySleep: (e.currentTarget as HTMLInputElement).checked })
-            }
-          />{" "}
+          <input type="checkbox" checked={device.legacySleep} onChange={(e) => send({ type: "settings", legacySleep: checked(e) })} />{" "}
           {tr("legacySleep")}
         </label>
         <p class="hint">{tr("legacySleepNote")}</p>
@@ -82,29 +174,15 @@ function DeviceSettings({ device, send }: { device: DeviceMeta; send: (m: ToWork
             min={0}
             max={100}
             value={battery.percent}
-            onChange={(e) =>
-              send({ type: "settings", battery: { ...battery, percent: +(e.currentTarget as HTMLInputElement).value } })
-            }
+            onChange={(e) => send({ type: "settings", battery: { ...battery, percent: +value(e) } })}
           />
         </label>
         <label>
-          <input
-            type="checkbox"
-            checked={battery.charging}
-            onChange={(e) =>
-              send({ type: "settings", battery: { ...battery, charging: (e.currentTarget as HTMLInputElement).checked } })
-            }
-          />{" "}
+          <input type="checkbox" checked={battery.charging} onChange={(e) => send({ type: "settings", battery: { ...battery, charging: checked(e) } })} />{" "}
           {tr("charging")}
         </label>
         <label>
-          <input
-            type="checkbox"
-            checked={battery.usb}
-            onChange={(e) =>
-              send({ type: "settings", battery: { ...battery, usb: (e.currentTarget as HTMLInputElement).checked } })
-            }
-          />{" "}
+          <input type="checkbox" checked={battery.usb} onChange={(e) => send({ type: "settings", battery: { ...battery, usb: checked(e) } })} />{" "}
           {tr("usb")}
         </label>
         <p class="hint">{tr("applyNext")}</p>
@@ -113,11 +191,265 @@ function DeviceSettings({ device, send }: { device: DeviceMeta; send: (m: ToWork
   );
 }
 
+function Devices({
+  devices,
+  active,
+  firmware,
+  send,
+  ask,
+}: {
+  devices: DeviceMeta[];
+  active: DeviceMeta | null;
+  firmware: string | null;
+  send: Send;
+  ask: Ask;
+}) {
+  return (
+    <Panel title={tr("devices")} open>
+      <div class="controls">
+        <label>
+          {tr("device")}{" "}
+          <select
+            value={active?.id}
+            disabled={!active}
+            onChange={(e) => send({ type: "selectDevice", id: (e.currentTarget as HTMLSelectElement).value })}
+          >
+            {devices.map((d) => (
+              <option value={d.id}>{d.label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!active}
+          onClick={() =>
+            ask({
+              message: tr("newDeviceName"),
+              input: "",
+              action: tr("newDevice"),
+              onAnswer: (label) => send({ type: "createDevice", label }),
+            })
+          }
+        >
+          {tr("newDevice")}
+        </button>
+        <button
+          type="button"
+          disabled={!active}
+          onClick={() =>
+            ask({
+              message: tr("renamePrompt"),
+              input: active?.label ?? "",
+              action: tr("renameDevice"),
+              onAnswer: (label) => send({ type: "renameDevice", label }),
+            })
+          }
+        >
+          {tr("renameDevice")}
+        </button>
+        <button type="button" disabled={!active} onClick={() => send({ type: "exportDevice" })}>
+          {tr("exportDevice")}
+        </button>
+        <label class="file-button">
+          {tr("importDevice")}
+          <input
+            type="file"
+            accept=".dryflash"
+            disabled={!active}
+            onChange={async (e) => {
+              const input = e.currentTarget as HTMLInputElement;
+              const f = input.files?.[0];
+              input.value = "";
+              if (f) {
+                const bytes = await f.arrayBuffer();
+                send({ type: "importDevice", bytes }, [bytes]);
+              }
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!active}
+          onClick={() =>
+            ask({
+              message: tr("factoryConfirm"),
+              action: tr("factoryReset"),
+              danger: true,
+              onAnswer: () => send({ type: "factoryReset" }),
+            })
+          }
+        >
+          {tr("factoryReset")}
+        </button>
+        <button
+          type="button"
+          disabled={!active}
+          onClick={() =>
+            ask({
+              message: tr("deleteConfirm"),
+              action: tr("deleteDevice"),
+              danger: true,
+              onAnswer: () => send({ type: "deleteDevice" }),
+            })
+          }
+        >
+          {tr("deleteDevice")}
+        </button>
+      </div>
+      <p class="hint">{firmware ? tr("firmwareOn").replace("{name}", firmware) : tr("noFirmwareOn")}</p>
+      {active && <DeviceSettings device={active} send={send} />}
+    </Panel>
+  );
+}
+
+function Panel({ title, open, children }: { title: string; open?: boolean; children: preact.ComponentChildren }) {
+  return (
+    <details class="panel" open={open}>
+      <summary>{title}</summary>
+      <div class="panel-body">{children}</div>
+    </details>
+  );
+}
+
+function CardFiles({
+  usage,
+  path,
+  entries,
+  ready,
+  send,
+  ask,
+}: {
+  usage: string;
+  path: string;
+  entries: CardEntry[] | null;
+  ready: boolean;
+  send: Send;
+  ask: Ask;
+}) {
+  const open = (p: string) => send({ type: "sdList", path: p });
+  return (
+    <Panel title={tr("card")}>
+      <p class="hint">{usage}</p>
+      <div class="controls">
+        <button type="button" disabled={!ready || path === "/"} onClick={() => open(parentPath(path))}>
+          {tr("up")}
+        </button>
+        <button type="button" disabled={!ready} onClick={() => open(path)}>
+          {tr("refresh")}
+        </button>
+        <label class="file-button">
+          {tr("upload")}
+          <input
+            type="file"
+            multiple
+            disabled={!ready}
+            onChange={async (e) => {
+              const input = e.currentTarget as HTMLInputElement;
+              const list = [...(input.files ?? [])];
+              input.value = "";
+              const files = await Promise.all(list.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })));
+              if (files.length) send({ type: "sdWrite", dir: path, files }, files.map((f) => f.bytes));
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() =>
+            ask({
+              message: tr("folderName"),
+              input: "",
+              action: tr("newFolder"),
+              onAnswer: (name) => send({ type: "sdMkdir", path: joinPath(path, name) }),
+            })
+          }
+        >
+          {tr("newFolder")}
+        </button>
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={() =>
+            ask({
+              message: tr("eraseConfirm"),
+              action: tr("eraseCard"),
+              danger: true,
+              onAnswer: () => send({ type: "eraseCard" }),
+            })
+          }
+        >
+          {tr("eraseCard")}
+        </button>
+      </div>
+      <p class="hint">{tr("cardChanges")}</p>
+      <p class="path">/ext{path === "/" ? "" : path}</p>
+      {entries === null ? (
+        <button type="button" disabled={!ready} onClick={() => open("/")}>
+          {tr("files")}
+        </button>
+      ) : entries.length === 0 ? (
+        <p class="hint">{tr("empty")}</p>
+      ) : (
+        <ul class="files">
+          {entries.map((f) => {
+            const full = joinPath(path, f.name);
+            return (
+              <li>
+                {f.dir ? (
+                  <button type="button" class="link" onClick={() => open(full)}>
+                    📁 {f.name}
+                  </button>
+                ) : (
+                  <span class="name">{f.name}</span>
+                )}
+                {!f.dir && <span class="size">{formatSize(f.size)}</span>}
+                <span class="actions">
+                  {!f.dir && (
+                    <button type="button" class="link" onClick={() => send({ type: "sdRead", path: full })}>
+                      {tr("download")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    class="link danger"
+                    onClick={() =>
+                      ask({
+                        message: tr("deleteFile").replace("{name}", f.name),
+                        action: tr("delete"),
+                        danger: true,
+                        onAnswer: () => send({ type: "sdRemove", path: full, dir: path }),
+                      })
+                    }
+                  >
+                    {tr("delete")}
+                  </button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
 export function App() {
   const worker = useRef<Worker | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const deviceBox = useRef<HTMLDivElement>(null);
   const bits = useRef(new Uint8Array(1024));
   const backlight = useRef(0);
+  const ink = useRef(new Float32Array(LCD_W * LCD_H));
+  const ghostOn = useRef(false);
+  const ghostFrame = useRef(0);
+  const captureCanvas = useRef<HTMLCanvasElement | null>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const gif = useRef<{ frames: GifFrame[]; last: number; start: number } | null>(null);
+  const otaRef = useRef(false);
+  const deviceLabel = useRef("dryflash");
+  const cardPath = useRef("/");
+
   const [ready, setReady] = useState(false);
   const [fidelity, setFidelity] = useState<FidelityRow[]>([]);
   const [firmware, setFirmware] = useState<string | null>(null);
@@ -126,26 +458,78 @@ export function App() {
   const [persistence, setPersistence] = useState<Persistence>("none");
   const [cardCapacity, setCardCapacity] = useState(0);
   const [cardUsed, setCardUsed] = useState(0);
+  const [listing, setListing] = useState<{ path: string; entries: CardEntry[] | null }>({ path: "/", entries: null });
   const [installed, setInstalled] = useState<string | null>(null);
   const [ota, setOta] = useState(false);
-  const otaRef = useRef(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [leds, setLeds] = useState<[number, number, number, number]>([0, 0, 0, 0]);
   const [log, setLog] = useState("");
+  const [events, setEvents] = useState<string[]>([]);
+  const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const [stop, setStop] = useState<Stop | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [turbo, setTurbo] = useState(false);
+  const [ghosting, setGhosting] = useState(false);
+  const [recording, setRecording] = useState<"webm" | "gif" | null>(null);
+  const [question, setQuestion] = useState<Question | null>(null);
   const [dragging, setDragging] = useState(false);
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
-  const send = (m: ToWorker, transfer: Transferable[] = []) => worker.current?.postMessage(m, transfer);
+  const send: Send = (m, transfer = []) => worker.current?.postMessage(m, transfer);
+
+  const drawCapture = () => {
+    const c = captureCanvas.current;
+    const from = canvas.current;
+    if (!c || !from) return;
+    const g = c.getContext("2d");
+    if (!g) return;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(from, 0, 0, c.width, c.height);
+  };
 
   const redraw = () => {
     const c = canvas.current?.getContext("2d");
     if (!c) return;
     const img = c.createImageData(LCD_W, LCD_H);
-    paint(bits.current, backlight.current, img.data);
+    if (ghostOn.current) paintInk(ink.current, backlight.current, img.data);
+    else paint(bits.current, backlight.current, img.data);
     c.putImageData(img, 0, 0);
+    drawCapture();
+  };
+
+  const ghostTick = () => {
+    ghostFrame.current = 0;
+    if (!ghostOn.current) return;
+    const moving = ghostStep(bits.current, ink.current, 0.35);
+    redraw();
+    if (moving) ghostFrame.current = requestAnimationFrame(ghostTick);
+  };
+
+  const onFrame = () => {
+    if (ghostOn.current) {
+      if (!ghostFrame.current) ghostFrame.current = requestAnimationFrame(ghostTick);
+    } else redraw();
+    const g = gif.current;
+    if (g) {
+      const now = performance.now();
+      if (now - g.last >= GIF_FRAME_MS) {
+        const n = g.frames.length;
+        if (n) g.frames[n - 1].delayMs = now - g.last;
+        g.frames.push({ bits: bits.current.slice(), delayMs: GIF_FRAME_MS });
+        g.last = now;
+      }
+      if (now - g.start > GIF_MAX_MS) stopGif();
+    }
+  };
+
+  const stopGif = () => {
+    const g = gif.current;
+    gif.current = null;
+    setRecording(null);
+    if (g?.frames.length) {
+      const bytes = encodeGif(g.frames, GIF_SCALE, inkColour, glass(backlight.current));
+      download(`${deviceLabel.current}.gif`, bytes.slice().buffer, "image/gif");
+    }
   };
 
   useEffect(() => {
@@ -162,21 +546,26 @@ export function App() {
         case "devices":
           setDevices(m.devices);
           setActive(m.active);
+          deviceLabel.current = m.active.label.replace(/[^\w.-]+/g, "_") || "dryflash";
           setPersistence(m.persistence);
           setCardCapacity(m.cardCapacityBytes);
           setCardUsed(m.cardUsedBytes);
           setFirmware(m.hasFirmware ? (m.active.firmware ?? "?") : null);
           setStatus(null);
           break;
-        case "exported": {
-          const url = URL.createObjectURL(new Blob([m.bytes], { type: "application/gzip" }));
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `${m.name.replace(/[^\w.-]+/g, "_")}.dryflash`;
-          a.click();
-          URL.revokeObjectURL(url);
+        case "exported":
+          download(`${m.name.replace(/[^\w.-]+/g, "_")}.dryflash`, m.bytes, "application/gzip");
           break;
-        }
+        case "sdListing":
+          cardPath.current = m.path;
+          setListing({ path: m.path, entries: m.entries });
+          break;
+        case "sdFile":
+          download(m.name, m.bytes);
+          break;
+        case "crashes":
+          setCrashes(m.crashes);
+          break;
         case "loaded":
           setFirmware(m.name);
           setInstalled(
@@ -185,6 +574,7 @@ export function App() {
               : null,
           );
           setLog("");
+          setEvents([]);
           setStop(null);
           setError(null);
           break;
@@ -196,11 +586,21 @@ export function App() {
           break;
         case "frame":
           bits.current = new Uint8Array(m.bits);
-          redraw();
+          onFrame();
           break;
         case "lights":
           backlight.current = m.rgbw[3];
           setLeds(m.rgbw);
+          setEvents((list) =>
+            [
+              `${new Date().toLocaleTimeString()} ${tr("ledEvent")
+                .replace("{r}", String(m.rgbw[0]))
+                .replace("{g}", String(m.rgbw[1]))
+                .replace("{b}", String(m.rgbw[2]))
+                .replace("{w}", String(m.rgbw[3]))}`,
+              ...list,
+            ].slice(0, EVENT_LIMIT),
+          );
           redraw();
           break;
         case "log": {
@@ -235,9 +635,7 @@ export function App() {
           setTimeout(() => {
             void fetch(pkg)
               .then((r) => r.arrayBuffer())
-              .then((bytes) =>
-                w.postMessage({ type: "load", name: pkg.split("/").pop()!, bytes, ota: true }, [bytes]),
-              );
+              .then((bytes) => w.postMessage({ type: "load", name: pkg.split("/").pop()!, bytes, ota: true }, [bytes]));
           }, 8000);
         }
       };
@@ -257,6 +655,27 @@ export function App() {
     };
   }, []);
 
+  // The panel is always a whole multiple of its 128×64 pixels.
+  useEffect(() => {
+    const el = stage.current;
+    const c = canvas.current;
+    if (!el || !c) return;
+    const fit = () => {
+      const fullscreen = document.fullscreenElement === deviceBox.current;
+      const width = el.clientWidth - 40;
+      const height = fullscreen ? window.innerHeight - 280 : Infinity;
+      const scale = Math.max(1, Math.min(fullscreen ? 12 : 4, Math.floor(Math.min(width / LCD_W, height / LCD_H))));
+      c.style.width = `${LCD_W * scale}px`;
+    };
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    document.addEventListener("fullscreenchange", fit);
+    return () => {
+      ro.disconnect();
+      document.removeEventListener("fullscreenchange", fit);
+    };
+  }, []);
+
   const press = (b: ButtonName, down: boolean) => {
     setPressed((p) => {
       const n = new Set(p);
@@ -268,8 +687,26 @@ export function App() {
   };
 
   useEffect(() => {
-    const target = (e: KeyboardEvent) =>
-      e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement ? null : buttonForKey(e.key);
+    // An on-screen key that has the focus works with Enter and Space as itself; other controls keep
+    // their keys, and anywhere else the keyboard drives the device.
+    const target = (e: KeyboardEvent): ButtonName | null => {
+      const el = e.target;
+      if (el instanceof HTMLElement && el.classList.contains("key")) {
+        if (e.key === "Enter" || e.key === " ") return el.dataset.button as ButtonName;
+        return buttonForKey(e.key);
+      }
+      if (document.querySelector("dialog[open]")) return null;
+      if (
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLSelectElement ||
+        el instanceof HTMLButtonElement ||
+        el instanceof HTMLTextAreaElement ||
+        (el instanceof HTMLElement && el.tagName === "SUMMARY")
+      ) {
+        return null;
+      }
+      return buttonForKey(e.key);
+    };
     const down = (e: KeyboardEvent) => {
       const b = target(e);
       if (!b || !firmware) return;
@@ -303,24 +740,69 @@ export function App() {
     if (f) void load(f);
   };
 
-  const button = (b: ButtonName, label: Key, cls: string, text: string) => (
-    <button
-      type="button"
-      class={`key ${cls}${pressed.has(b) ? " held" : ""}`}
-      aria-label={tr(label)}
-      disabled={!firmware}
-      onPointerDown={(e) => {
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        press(b, true);
-      }}
-      onPointerUp={() => press(b, false)}
-      onPointerCancel={() => press(b, false)}
-    >
-      {text}
-    </button>
-  );
+  const ensureCapture = () => {
+    const c = captureCanvas.current ?? document.createElement("canvas");
+    c.width = LCD_W * CAPTURE_SCALE;
+    c.height = LCD_H * CAPTURE_SCALE;
+    captureCanvas.current = c;
+    drawCapture();
+    return c;
+  };
+
+  const screenshot = () => {
+    ensureCapture().toBlob((blob) => {
+      if (blob) download(`${deviceLabel.current}.png`, blob, "image/png");
+    }, "image/png");
+  };
+
+  const toggleWebm = () => {
+    if (recorder.current) {
+      recorder.current.stop();
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setError(tr("noRecorder"));
+      return;
+    }
+    const type = ["video/webm;codecs=vp9", "video/webm", "video/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+    if (!type) {
+      setError(tr("noRecorder"));
+      return;
+    }
+    const rec = new MediaRecorder(ensureCapture().captureStream(30), { mimeType: type });
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => chunks.push(e.data);
+    rec.onstop = () => {
+      recorder.current = null;
+      setRecording(null);
+      download(`${deviceLabel.current}.${type.includes("mp4") ? "mp4" : "webm"}`, new Blob(chunks, { type }), type);
+    };
+    recorder.current = rec;
+    rec.start();
+    setRecording("webm");
+  };
+
+  const toggleGif = () => {
+    if (gif.current) {
+      stopGif();
+      return;
+    }
+    const now = performance.now();
+    gif.current = { frames: [{ bits: bits.current.slice(), delayMs: GIF_FRAME_MS }], last: now, start: now };
+    setRecording("gif");
+  };
+
+  const toggleGhosting = (on: boolean) => {
+    setGhosting(on);
+    ghostOn.current = on;
+    if (on) {
+      for (let i = 0; i < ink.current.length; i++) ink.current[i] = (bits.current[i >> 3] >> (7 - (i & 7))) & 1;
+    }
+    redraw();
+  };
 
   const running = status?.running ?? false;
+  const hasFirmware = !!firmware;
 
   return (
     <main
@@ -340,241 +822,199 @@ export function App() {
         </p>
       </header>
 
-      <section class="device" aria-label={tr("device")}>
-        <div class="screen">
-          <canvas ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" />
-          <div class="leds" aria-hidden="true">
-            <span style={{ background: `rgb(${leds[0]},${leds[1]},${leds[2]})` }} />
+      <div class="layout">
+        <section class="stage" ref={stage} aria-label={tr("device")}>
+          <div class="device" ref={deviceBox}>
+            <Shell />
+            <div class="device-top" aria-hidden="true">
+              <span class="led" style={{ background: `rgb(${leds[0]},${leds[1]},${leds[2]})` }} />
+              <span class="brand">dryflash</span>
+              <span class="grille">
+                <i />
+                <i />
+                <i />
+              </span>
+            </div>
+            <div class="bezel">
+              <canvas ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" />
+            </div>
+            <Keys pressed={pressed} press={press} enabled={hasFirmware} />
           </div>
-        </div>
-        <div class="pad">
-          {button("up", "btnUp", "up", "▲")}
-          {button("left", "btnLeft", "left", "◀")}
-          {button("ok", "btnOk", "ok", "OK")}
-          {button("right", "btnRight", "right", "▶")}
-          {button("down", "btnDown", "down", "▼")}
-          {button("back", "btnBack", "back", "↩")}
-        </div>
-        <p class="hint">{tr("keyboard")}</p>
-      </section>
+          <div class="toolbar">
+            <button type="button" disabled={!hasFirmware} onClick={() => send({ type: "control", action: "reset" })}>
+              {tr("reset")}
+            </button>
+            <button
+              type="button"
+              disabled={!hasFirmware}
+              onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}
+            >
+              {running ? tr("pause") : tr("resume")}
+            </button>
+            <label>
+              <input
+                type="checkbox"
+                checked={turbo}
+                onChange={(e) => {
+                  const on = (e.currentTarget as HTMLInputElement).checked;
+                  setTurbo(on);
+                  send({ type: "turbo", on });
+                }}
+              />{" "}
+              {tr("turbo")}
+            </label>
+            <button type="button" disabled={!hasFirmware} onClick={screenshot}>
+              {tr("screenshot")}
+            </button>
+            <button type="button" disabled={!hasFirmware || recording === "gif"} onClick={toggleWebm}>
+              {recording === "webm" ? tr("stopRecording") : tr("recordWebm")}
+            </button>
+            <button type="button" disabled={!hasFirmware || recording === "webm"} onClick={toggleGif} title={tr("gifLimit")}>
+              {recording === "gif" ? tr("stopRecording") : tr("recordGif")}
+            </button>
+            <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
+              {tr("fullscreen")}
+            </button>
+            <label>
+              <input
+                type="checkbox"
+                checked={ghosting}
+                onChange={(e) => toggleGhosting((e.currentTarget as HTMLInputElement).checked)}
+              />{" "}
+              {tr("ghosting")}
+            </label>
+          </div>
+          {recording && (
+            <p class="hint rec" role="status">
+              {tr("recording")}
+            </p>
+          )}
+          {status && (
+            <p class="meter">
+              {running ? tr("running") : tr("paused")} · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
+              {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
+            </p>
+          )}
+          <p class="hint">{tr("keyboard")}</p>
+        </section>
 
-      <section class="firmware">
-        <label class="drop">
-          <span>{ready ? (firmware ?? tr("drop")) : tr("starting")}</span>
-          <input
-            type="file"
-            accept=".dfu,.tgz"
-            disabled={!ready}
-            onChange={(e) => {
-              const f = (e.currentTarget as HTMLInputElement).files?.[0];
-              if (f) void load(f);
-            }}
+        <div class="panels">
+          <Panel title={tr("firmwarePanel")} open>
+            <label class="drop">
+              <span>{ready ? tr("drop") : tr("starting")}</span>
+              <input
+                type="file"
+                accept=".dfu,.tgz"
+                disabled={!ready}
+                onChange={(e) => {
+                  const f = (e.currentTarget as HTMLInputElement).files?.[0];
+                  if (f) void load(f);
+                }}
+              />
+              <span class="choose">{tr("choose")}</span>
+            </label>
+            <p class="hint">{tr("privacy")}</p>
+            {installed && <p class="hint">{installed}</p>}
+            <label>
+              <input
+                type="checkbox"
+                checked={ota}
+                disabled={!hasFirmware}
+                onChange={(e) => {
+                  const on = (e.currentTarget as HTMLInputElement).checked;
+                  setOta(on);
+                  otaRef.current = on;
+                }}
+              />{" "}
+              {tr("otaMode")}
+            </label>
+            <p class="hint">{tr("otaNote")}</p>
+            {error && (
+              <p class="error" role="alert">
+                {tr("error")}: {error}
+              </p>
+            )}
+            {stop && (
+              <div class="error" role="alert">
+                <strong>{tr("stopped")}:</strong> {stop.reason}
+                <details>
+                  <summary>{tr("digest")}</summary>
+                  <pre>{stop.digest}</pre>
+                </details>
+              </div>
+            )}
+          </Panel>
+
+          <Devices devices={devices} active={active} firmware={firmware} send={send} ask={setQuestion} />
+
+          <CardFiles
+            usage={`${tr("cardUsage")
+              .replace("{used}", ((status?.cardUsedBytes ?? cardUsed) / 1e6).toFixed(1))
+              .replace("{total}", (cardCapacity / 1e6).toFixed(0))} ${tr(`persist_${persistence}` as Key)}`}
+            path={listing.path}
+            entries={listing.entries}
+            ready={ready}
+            send={send}
+            ask={setQuestion}
           />
-          <span class="choose">{tr("choose")}</span>
-        </label>
-        <p class="hint">{tr("privacy")}</p>
-        {installed && <p class="hint">{installed}</p>}
-        <label>
-          <input
-            type="checkbox"
-            checked={ota}
-            disabled={!firmware}
-            onChange={(e) => {
-              const on = (e.currentTarget as HTMLInputElement).checked;
-              setOta(on);
-              otaRef.current = on;
-            }}
-          />{" "}
-          {tr("otaMode")}
-        </label>
-        <p class="hint">{tr("otaNote")}</p>
-        <div class="controls">
-          <button
-            type="button"
-            disabled={!firmware}
-            onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}
-          >
-            {running ? tr("pause") : tr("resume")}
-          </button>
-          <button type="button" disabled={!firmware} onClick={() => send({ type: "control", action: "reset" })}>
-            {tr("reset")}
-          </button>
-          <label>
-            <input
-              type="checkbox"
-              checked={turbo}
-              onChange={(e) => {
-                const on = (e.currentTarget as HTMLInputElement).checked;
-                setTurbo(on);
-                send({ type: "turbo", on });
-              }}
-            />{" "}
-            {tr("turbo")}
-          </label>
-        </div>
-        {status && (
-          <p class="meter">
-            {running ? tr("running") : tr("paused")} · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
-            {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
-          </p>
-        )}
-        {!firmware && ready && <p class="hint">{tr("noFirmware")}</p>}
-        {error && (
-          <p class="error" role="alert">
-            {tr("error")}: {error}
-          </p>
-        )}
-        {stop && (
-          <div class="error" role="alert">
-            <strong>{tr("stopped")}:</strong> {stop.reason}
-            {stop.crashes.length > 0 && (
-              <ul>
-                {stop.crashes.map((c) => (
+
+          <Panel title={tr("crashPanel")} open={crashes.length > 0}>
+            {crashes.length === 0 && !stop?.crashes.length ? (
+              <p class="hint">{tr("noCrashes")}</p>
+            ) : (
+              <ul class="crashes">
+                {(crashes.length ? crashes : (stop?.crashes ?? [])).map((c) => (
                   <li>
                     {(c.atMs / 1000).toFixed(3)} s — {c.message}
                   </li>
                 ))}
               </ul>
             )}
-            <details>
-              <summary>{tr("digest")}</summary>
-              <pre>{stop.digest}</pre>
-            </details>
-          </div>
-        )}
-      </section>
+          </Panel>
 
-      <section>
-        <h2>{tr("card")}</h2>
-        <p class="hint">
-          {tr("cardUsage")
-            .replace("{used}", ((status?.cardUsedBytes ?? cardUsed) / 1e6).toFixed(1))
-            .replace("{total}", (cardCapacity / 1e6).toFixed(0))}{" "}
-          {tr(`persist_${persistence}` as Key)}
-        </p>
-        <div class="controls">
-          <button
-            type="button"
-            disabled={!ready}
-            onClick={() => {
-              if (confirm(tr("eraseConfirm"))) send({ type: "eraseCard" });
-            }}
-          >
-            {tr("eraseCard")}
-          </button>
+          <Panel title={tr("eventsPanel")}>
+            <p class="hint">{tr("moreEventsLater")}</p>
+            {events.length === 0 ? (
+              <p class="hint">{tr("noEvents")}</p>
+            ) : (
+              <ul class="events">
+                {events.map((e) => (
+                  <li>{e}</li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel title={tr("log")}>
+            <pre class="log">{log}</pre>
+          </Panel>
+
+          <Panel title={tr("fidelity")}>
+            <div class="table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{tr("component")}</th>
+                    <th>{tr("level")}</th>
+                    <th>{tr("note")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fidelity.map((r) => (
+                    <tr>
+                      <td>{r.name}</td>
+                      <td class={`lvl ${r.level}`}>{tr(`lvl_${r.level}` as Key)}</td>
+                      <td>{r.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
         </div>
-      </section>
+      </div>
 
-      <section>
-        <h2>{tr("devices")}</h2>
-        <div class="controls">
-          <label>
-            {tr("device")}{" "}
-            <select
-              value={active?.id}
-              disabled={!ready}
-              onChange={(e) => send({ type: "selectDevice", id: (e.currentTarget as HTMLSelectElement).value })}
-            >
-              {devices.map((d) => (
-                <option value={d.id}>{d.label}</option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => {
-              const label = prompt(tr("newDeviceName"));
-              if (label) send({ type: "createDevice", label });
-            }}
-          >
-            {tr("newDevice")}
-          </button>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => {
-              const label = prompt(tr("renamePrompt"), active?.label);
-              if (label) send({ type: "renameDevice", label });
-            }}
-          >
-            {tr("renameDevice")}
-          </button>
-          <button type="button" disabled={!active} onClick={() => send({ type: "exportDevice" })}>
-            {tr("exportDevice")}
-          </button>
-          <label class="file-button">
-            {tr("importDevice")}
-            <input
-              type="file"
-              accept=".dryflash"
-              disabled={!active}
-              onChange={async (e) => {
-                const input = e.currentTarget as HTMLInputElement;
-                const f = input.files?.[0];
-                input.value = "";
-                if (f) {
-                  const bytes = await f.arrayBuffer();
-                  send({ type: "importDevice", bytes }, [bytes]);
-                }
-              }}
-            />
-          </label>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => {
-              if (confirm(tr("factoryConfirm"))) send({ type: "factoryReset" });
-            }}
-          >
-            {tr("factoryReset")}
-          </button>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => {
-              if (confirm(tr("deleteConfirm"))) send({ type: "deleteDevice" });
-            }}
-          >
-            {tr("deleteDevice")}
-          </button>
-        </div>
-        <p class="hint">
-          {firmware ? tr("firmwareOn").replace("{name}", firmware) : tr("noFirmwareOn")}
-        </p>
-        {active && <DeviceSettings device={active} send={send} />}
-      </section>
-
-      <section>
-        <details>
-          <summary>{tr("log")}</summary>
-          <pre class="log">{log}</pre>
-        </details>
-      </section>
-
-      <section>
-        <h2>{tr("fidelity")}</h2>
-        <div class="table">
-          <table>
-            <thead>
-              <tr>
-                <th>{tr("component")}</th>
-                <th>{tr("level")}</th>
-                <th>{tr("note")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fidelity.map((r) => (
-                <tr>
-                  <td>{r.name}</td>
-                  <td class={`lvl ${r.level}`}>{tr(`lvl_${r.level}` as Key)}</td>
-                  <td>{r.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <AskDialog question={question} close={() => setQuestion(null)} />
 
       <footer>
         <p>{tr("positioning")}</p>
