@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # ADR-0003 — Hosting: one Cloudflare Worker with static assets
 
-- Status: **Accepted** (maintainer, 2026-10-31); final URL set when the Cloudflare account exists
+- Status: **Accepted** (maintainer, 2026-10-31); URL since M3: https://app.dryflash.workers.dev
 - Date: 2026-10-31
 
 ## Context

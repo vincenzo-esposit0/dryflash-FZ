@@ -8,8 +8,8 @@ from `web/public/_headers`. GitHub Actions deploys it after every CI job passed
 
 | Event | Result |
 |---|---|
-| push to `main` | `wrangler deploy` → production, `https://app.<account-subdomain>.workers.dev` |
-| pull request from this repository | `wrangler versions upload --preview-alias pr-<n>` → `https://pr-<n>-app.<account-subdomain>.workers.dev` |
+| push to `main` | `wrangler deploy` → production, https://app.dryflash.workers.dev |
+| pull request from this repository | `wrangler versions upload --preview-alias pr-<n>` → `https://pr-<n>-app.dryflash.workers.dev` |
 | pull request from a fork | no deploy (no secrets) |
 
 ## One-time setup (maintainer)

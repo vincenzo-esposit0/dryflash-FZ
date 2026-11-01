@@ -58,7 +58,7 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 - ☑ CPU2 as a FUS without wireless stack; virtual device with Legacy sleep (ADR-0012)
 - ☑ `core-wasm` bindings + Web Worker host (slices, 1× pacing, Turbo, transferable frames, minimum press time)
 - ☑ Minimal web UI: drag & drop `.dfu`, LCD canvas, keyboard + on-screen buttons, fidelity table, honest-positioning text, disclaimer, virtual-device setting, firmware log
-- ◐ Deploy preview: Worker config, headers and CI deploy job ready (docs/DEPLOY.md); live once the Cloudflare secrets exist
+- ☑ Deployed: https://app.dryflash.workers.dev (one Cloudflare Worker, CI deploy after all checks, docs/DEPLOY.md)
 
 **DoD:** Desktop rendered in the browser, menus navigable with the keyboard, preview URL live.
 

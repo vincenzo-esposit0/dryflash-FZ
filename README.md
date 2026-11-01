@@ -6,8 +6,9 @@ Try any Flipper Zero firmware before flashing it to your real device: dryflash e
 real, unmodified release binaries (`.dfu` / update `.tgz`) on an instruction-level model of the
 STM32WB55, with no backend and no hardware.
 
-> **Status: pre-alpha (milestone M2).** In the emulator core the official firmware boots to its
-> services and runs stably (no display, input or SD card yet; no web UI yet). See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status: pre-alpha (milestone M3).** Try it at **https://app.dryflash.workers.dev**: drop a
+> firmware `.dfu` on the page. The official firmware boots to its Desktop and the menus are
+> navigable. No SD card or `.tgz` yet (M4), no Bluetooth. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it is — and what it is not
 
