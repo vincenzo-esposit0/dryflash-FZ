@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # ADR-0014 — Real OTA runs the firmware's own updater, without installing the radio stack
 
-- Status: **Proposed** (needs the maintainer's confirmation: it qualifies the M4 definition of done)
+- Status: **Accepted** by the maintainer; it qualifies the M4 definition of done
 - Date: 2026-11-01
 - Milestone: M4
 

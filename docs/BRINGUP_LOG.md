@@ -501,7 +501,7 @@ The custom firmwares were only booted to the Desktop's animations; their apps we
   decoded instructions. Flash now survives a power cycle in the web app (it used to be reloaded from
   the image, which would have undone an update).
 - `package::stage_ota` + `Machine::start_ota`: the package in `/ext/update/<name>/`, the `.fupdate`
-  pointer, boot mode PreUpdate, reset. Radio entries emptied (ADR-0014, **proposed**).
+  pointer, boot mode PreUpdate, reset. Radio entries emptied (ADR-0014).
 - **Unleashed → official, firmware's own updater** (`core/tests/ota_official.rs`, also run in the
   browser with OPFS): `/int` backup, reset; `1.5.1 (RAM)` runs from SRAM1; option bytes validated
   (stage 8), DFU validated, flash written and read back (9–11), reset; `/int` restored (12), old
