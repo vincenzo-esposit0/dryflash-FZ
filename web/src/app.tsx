@@ -532,7 +532,7 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [provenance, setProvenance] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [tab, setTab] = useState<Tab>("device");
-  const [view, setView] = useState<View>(() => fitView(800));
+  const [view, setView] = useState<View>(() => fitView(window.innerWidth - 48));
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
   const send: Send = (m, transfer = []) => worker.current?.postMessage(m, transfer);
@@ -818,11 +818,11 @@ export function App({ embed = false }: { embed?: boolean }) {
     if (!el) return;
     const update = () => {
       const full = document.fullscreenElement === deviceBox.current;
-      setView(
-        full ? fitView(window.innerWidth, window.innerHeight, 12) : fitView(el.clientWidth - 16),
-      );
+      const next = full ? fitView(window.innerWidth, window.innerHeight, 12) : fitView(el.clientWidth - 16);
+      // Only a real change: resizing the device resizes this element, which would observe itself.
+      setView((v) => (v.scale === next.scale && v.model.width === next.model.width ? v : next));
     };
-    const ro = new ResizeObserver(update);
+    const ro = new ResizeObserver(() => requestAnimationFrame(update));
     ro.observe(el);
     document.addEventListener("fullscreenchange", update);
     return () => {

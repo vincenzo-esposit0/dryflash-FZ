@@ -45,6 +45,8 @@ scripts/build-wasm.sh                          # wasm core + JS bindings for web
 npm install && npm test                        # web tests
 npm run dev -w web                             # emulator at http://localhost:5173 (drop a .dfu on the page)
 npm run build                                  # static web build in web/dist
+npx playwright install --with-deps             # once, from tests/e2e
+npm run e2e                                    # the production build on the Worker, in three browser engines
 ```
 
 Bring-up tool: `cargo run --release -p dryflash-core --example boot -- <firmware.dfu> --elf <firmware.elf>`

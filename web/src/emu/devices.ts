@@ -391,11 +391,15 @@ async function openIdb(): Promise<DeviceBackend> {
 export async function openDevices(): Promise<DeviceBackend> {
   const hasSyncHandles =
     typeof FileSystemFileHandle !== "undefined" && "createSyncAccessHandle" in FileSystemFileHandle.prototype;
-  try {
-    if (hasSyncHandles) {
+  if (hasSyncHandles) {
+    try {
       const root = await navigator.storage.getDirectory();
       return new OpfsBackend(await root.getDirectoryHandle("devices", { create: true }));
+    } catch {
+      // Refused in some private modes, where IndexedDB can still work.
     }
+  }
+  try {
     return await openIdb();
   } catch {
     return new MemoryBackend();

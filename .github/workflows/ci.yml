@@ -123,11 +123,37 @@ jobs:
         with:
           command: check licenses advisories
 
+  # The production build on the real Worker, in the three browser engines. Firefox runs here: Playwright's
+  # build of it does not start on macOS 27.
+  e2e:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Cache pinned firmware (fetched from the original host, hash-checked)
+        uses: actions/cache@v6
+        with:
+          path: firmware/cache/official
+          key: fw-official-e2e-${{ hashFiles('firmware/compat.json') }}
+      - run: node scripts/fetch-firmware.mjs official
+      - run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: tests/e2e
+      - run: npm run e2e
+
   # ADR-0003 (a): deploy the Worker only after every check passed. main → production;
   # pull requests from this repository → a preview version with alias pr-<number>.
   # Pull requests from forks get no secrets and skip this job.
   deploy:
-    needs: [rust, cpu-fuzz, web, licences]
+    needs: [rust, cpu-fuzz, web, licences, e2e]
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)

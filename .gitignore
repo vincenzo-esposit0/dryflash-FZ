@@ -19,3 +19,5 @@ __pycache__/
 /runner/wasm/
 # Wrangler local dev state
 .wrangler/
+test-results/
+playwright-report/

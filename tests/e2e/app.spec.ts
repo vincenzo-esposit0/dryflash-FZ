@@ -1,0 +1,323 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Needs the pinned firmware: node scripts/fetch-firmware.mjs official
+import AxeBuilder from "@axe-core/playwright";
+import { test as base, expect, type Page } from "@playwright/test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+const TGZ = resolve(__dirname, "../../firmware/cache/official/flipper-z-f7-update-1.5.1.tgz");
+
+/**
+ * Every test fails on an uncaught error, a console error or a CSP violation. One exception: WebKit reports
+ * `style-src-attr` for its own internals of a `<select>`, with no effect on rendering. Only that element is
+ * forgiven, and the CSP is not relaxed for it.
+ */
+const test = base.extend<{ errorWatch: void }>({
+  errorWatch: [
+    async ({ page, browserName }, use) => {
+      const errors: string[] = [];
+      page.on("pageerror", (e) => errors.push(`uncaught: ${e.message}`));
+      page.on("console", (m) => {
+        const csp = /Refused to apply a stylesheet/.test(m.text());
+        if (m.type() === "error" && !(csp && browserName === "webkit")) errors.push(m.text());
+      });
+      await page.addInitScript(() => {
+        const w = window as unknown as { __violations: string[] };
+        w.__violations = [];
+        addEventListener("securitypolicyviolation", (e) => {
+          const element = (e.target as Element | null)?.tagName;
+          w.__violations.push(`${e.violatedDirective} on ${element} from ${e.blockedURI}`);
+        });
+      });
+      await use();
+      const seen = await page
+        .evaluate(() => (window as unknown as { __violations?: string[] }).__violations ?? [])
+        .catch(() => [] as string[]);
+      const forgiven = (v: string) => browserName === "webkit" && v.startsWith("style-src-attr on SELECT");
+      expect([...errors, ...seen.filter((v) => !forgiven(v))]).toEqual([]);
+    },
+    { auto: true },
+  ],
+});
+
+async function install(page: Page) {
+  await page.goto("/");
+  await expect(page.getByText("Drop a firmware")).toBeVisible();
+  await page.locator(".drop input").setInputFiles(TGZ);
+  await expect(page.locator(".meter")).toContainText("Running");
+}
+
+const screen = (page: Page) => page.locator("canvas.lcd").evaluate((c: HTMLCanvasElement) => c.toDataURL());
+const darkPixels = (page: Page) =>
+  page.locator("canvas.lcd").evaluate((c: HTMLCanvasElement) => {
+    const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] < 64) n++;
+    return n;
+  });
+
+async function log(page: Page) {
+  await page.getByRole("tab", { name: "Diagnostics" }).click();
+  return page.locator(".log");
+}
+
+/** Waits for the firmware to show something, then for the popup of a device without factory keys. */
+async function bootToPopup(page: Page) {
+  await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
+  await expect(await log(page)).toContainText("Secure Enclave verification failed", { timeout: 30_000 });
+}
+
+async function expectScreenChanges(page: Page, before: string) {
+  await expect.poll(() => screen(page), { timeout: 15_000 }).not.toBe(before);
+}
+
+test.describe("with a firmware", () => {
+  test.skip(!existsSync(TGZ), "needs the pinned firmware");
+
+  test("a package installs, boots and obeys the keyboard", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    await expect(page.locator(".log")).toContainText("card mounted");
+    const popup = await screen(page);
+    await page.locator("h1").click();
+    await page.keyboard.press("Escape");
+    await expectScreenChanges(page, popup);
+    await page.waitForTimeout(500);
+    const desktop = await screen(page);
+    await page.keyboard.press("Enter");
+    await expectScreenChanges(page, desktop);
+  });
+
+  test("the drawn keys work with the mouse", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    const popup = await screen(page);
+    await page.locator(".key.back").click();
+    await expectScreenChanges(page, popup);
+    await page.waitForTimeout(500);
+    const desktop = await screen(page);
+    await page.locator(".key.ok").click();
+    await expectScreenChanges(page, desktop);
+    await page.waitForTimeout(1000);
+    const menu = await screen(page);
+    await page.locator(".key.down").click();
+    await expectScreenChanges(page, menu);
+  });
+
+  test("a reload resumes the device with its firmware and card", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    await page.waitForTimeout(2500); // the card is saved about once a second
+    await page.reload();
+    await expect(page.locator(".meter")).toContainText("Running");
+    await expect(page.locator(".info dd").first()).toContainText("flipper-z-f7-update-1.5.1.tgz");
+    await expect(page.locator(".info")).toContainText("Saved in this browser");
+    await expect(await log(page)).toContainText("card mounted", { timeout: 30_000 });
+    await expect(page.locator(".log")).not.toContainText('Failed to read "/int/.dolphin.state"');
+  });
+
+  test("files can be uploaded, downloaded and deleted, and the firmware still mounts the card", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    await page.getByRole("tab", { name: "Files" }).click();
+    await expect(page.locator(".files")).toContainText("apps");
+    await page.locator('.file-button:has-text("Upload") input').setInputFiles({
+      name: "my long test name.sub",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Filetype: test\n"),
+    });
+    const row = page.locator(".files li", { hasText: "my long test name.sub" });
+    await expect(row).toBeVisible();
+    const [download] = await Promise.all([page.waitForEvent("download"), row.getByRole("button", { name: "Download" }).click()]);
+    expect(download.suggestedFilename()).toBe("my long test name.sub");
+    await row.getByRole("button", { name: "Delete" }).click();
+    await page.locator("dialog.ask button[type=submit]").click();
+    await expect(row).toHaveCount(0);
+    await expect(page.locator(".meter")).toContainText("Running");
+    await expect(await log(page)).toContainText("card mounted");
+  });
+
+  test("screenshot and GIF download working files", async ({ page }) => {
+    await install(page);
+    await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
+    const [png] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Screenshot" }).click()]);
+    expect(png.suggestedFilename()).toMatch(/\.png$/);
+    await page.getByRole("button", { name: "Record GIF" }).click();
+    await page.waitForTimeout(1200);
+    const [gif] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Stop recording" }).click()]);
+    expect(gif.suggestedFilename()).toMatch(/\.gif$/);
+    const bytes = await (await import("node:fs/promises")).readFile(await gif.path());
+    expect(bytes.subarray(0, 6).toString()).toBe("GIF89a");
+  });
+
+  test("a device exports and imports as a new one with its firmware", async ({ page }) => {
+    await install(page);
+    await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
+    await page.getByRole("tab", { name: "Backup" }).click();
+    const [file] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Export" }).click()]);
+    expect(file.suggestedFilename()).toMatch(/\.dryflash$/);
+    await page.locator('.file-button:has-text("Import") input').setInputFiles(await file.path());
+    await page.getByRole("tab", { name: "Device" }).click();
+    await expect(page.locator(".tab-section select option", { hasText: "(import)" })).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator(".info dd").first()).toContainText("flipper-z-f7-update-1.5.1.tgz");
+    await expect(page.locator(".meter")).toContainText("Running");
+  });
+});
+
+test.describe("devices", () => {
+  test("a new device can be made, is empty, and factory reset asks first", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "New device" }).click();
+    await page.locator("dialog.ask input").fill("Lab");
+    await page.locator("dialog.ask button[type=submit]").click();
+    await expect(page.locator(".tab-section select option", { hasText: "Lab" })).toHaveCount(1);
+    await expect(page.locator(".info dd").first()).toContainText("No firmware");
+    await page.getByRole("button", { name: "Factory reset" }).click();
+    await expect(page.locator("dialog.ask")).toBeVisible();
+    await page.locator("dialog.ask").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.locator("dialog.ask")).toBeHidden();
+  });
+});
+
+test.describe("links and the proxy", () => {
+  test("a link asks first and names the source", async ({ page }) => {
+    await page.goto("/?fw=https%3A%2F%2Fexample.com%2Fa.tgz");
+    await expect(page.locator("dialog.ask")).toContainText("https://example.com/a.tgz");
+    await expect(page.locator("dialog.ask")).toContainText("From a link");
+    await page.locator("dialog.ask").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.locator("dialog.ask")).toBeHidden();
+  });
+
+  test("the proxy refuses what is not in its allowlist", async ({ request }) => {
+    expect((await request.get("/proxy/fetch?url=https%3A%2F%2Fexample.com%2Fa")).status()).toBe(403);
+    expect((await request.get("/proxy/other")).status()).toBe(404);
+    expect(
+      (
+        await request.get(
+          "/proxy/fetch?url=https%3A%2F%2Fgithub.com%2FDarkFlippers%2Funleashed-firmware%2Freleases%2Fdownload%2Fv%2Fa",
+          { headers: { Origin: "https://evil.example" } },
+        )
+      ).status(),
+    ).toBe(403);
+  });
+
+  test("only the embed page may be framed", async ({ request }) => {
+    const frame = async (p: string) => (await request.get(p)).headers()["content-security-policy"];
+    expect(await frame("/embed")).toContain("frame-ancestors *");
+    expect(await frame("/")).toContain("frame-ancestors 'self'");
+    expect(await frame("/about")).toContain("frame-ancestors 'self'");
+  });
+});
+
+test.describe("pages", () => {
+  test("/compat lists the firmwares and says what is not tested", async ({ page }) => {
+    await page.goto("/compat");
+    await expect(page.getByRole("heading", { name: "Compatibility" })).toBeVisible();
+    await expect(page.locator("tbody tr")).toHaveCount(4);
+    await expect(page.locator("tbody")).toContainText("Not tested");
+  });
+
+  test("/about shows the fidelity table from the core", async ({ page }) => {
+    await page.goto("/about");
+    await expect(page.locator("tbody tr").first()).toBeVisible();
+    await expect(page.locator("tbody")).toContainText("CPU2");
+    await expect(page.locator("footer")).toContainText("Not affiliated");
+  });
+
+  test("/embed shows only the device and talks to its parent", async ({ page }) => {
+    await page.goto("/about");
+    const ready = await page.evaluate(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          const f = document.createElement("iframe");
+          f.src = "/embed";
+          addEventListener("message", (e) => {
+            if (e.data?.source === "dryflash" && e.data.type === "ready") resolve(e.data.version);
+          });
+          setTimeout(() => reject(new Error("no ready message")), 20_000);
+          document.body.append(f);
+        }),
+    );
+    expect(ready).toMatch(/\d+\.\d+/);
+    const frame = page.frameLocator("iframe");
+    await expect(frame.locator(".key.ok")).toBeAttached();
+    await expect(frame.locator(".tabs")).toHaveCount(0);
+    await expect(frame.locator("nav")).toHaveCount(0);
+  });
+
+  test("a phone-sized window has no sideways scroll, and the panel is whole-number sized", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/");
+    await expect(page.locator(".key.ok")).toBeAttached();
+    const m = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      inner: innerWidth,
+      lcd: document.querySelector(".lcd")!.getBoundingClientRect().width,
+    }));
+    expect(m.scroll).toBeLessThanOrEqual(m.inner);
+    expect(m.lcd % 128).toBe(0);
+  });
+});
+
+test.describe("accessibility", () => {
+  for (const path of ["/", "/compat", "/about"]) {
+    test(`${path} has no WCAG A or AA violations`, async ({ page }) => {
+      await page.goto(path);
+      await expect(page.locator("footer")).toBeVisible();
+      await page.waitForTimeout(800);
+      const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      expect(violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target).join(" ")}`)).toEqual([]);
+    });
+  }
+
+  test("tabs work with the arrow keys", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("tab", { name: "Device" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByRole("tab", { name: "Update" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "Update" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("the page's language follows the text", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  });
+
+  test.describe("in Italian", () => {
+    test.use({ locale: "it-IT" });
+
+    test("the language and the text are Italian", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.locator("html")).toHaveAttribute("lang", "it");
+      await expect(page.getByRole("tab", { name: "Aggiorna" })).toBeVisible();
+    });
+
+    test("no WCAG A or AA violations", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.locator("footer")).toBeVisible();
+      await page.waitForTimeout(800);
+      const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+      expect(violations.map((v) => v.id)).toEqual([]);
+    });
+  });
+
+  test("a drawn key with focus answers Enter, and passes arrows to the device", async ({ page }) => {
+    test.skip(!existsSync(TGZ), "needs the pinned firmware");
+    await install(page);
+    await bootToPopup(page);
+    await page.waitForTimeout(500);
+    const popup = await screen(page);
+    await page.locator(".key.back").focus();
+    await page.keyboard.press("Enter");
+    await expectScreenChanges(page, popup);
+    await page.waitForTimeout(500);
+    const desktop = await screen(page);
+    await page.locator(".key.ok").focus();
+    await page.keyboard.press("Enter");
+    await expectScreenChanges(page, desktop);
+    await page.waitForTimeout(1000);
+    const menu = await screen(page);
+    await page.keyboard.press("ArrowDown");
+    await expectScreenChanges(page, menu);
+  });
+});
