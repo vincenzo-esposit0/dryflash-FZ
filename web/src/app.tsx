@@ -19,6 +19,7 @@ import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
 import { Fidelity } from "./pages";
 import { SiteFooter, SiteHeader } from "./ui/chrome";
+import { drawShell, fit, landscape, toRgba, type Geometry } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
 const locale = detectLocale(navigator.languages ?? [navigator.language]);
@@ -86,44 +87,75 @@ interface Stop {
   digest: string;
 }
 
-/** The dryflash shell: an original drawing, stretched behind the real canvas and buttons. */
-function Shell() {
-  return (
-    <svg class="shell" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-      <polygon class="body" points="0,0 92,0 100,7 100,100 8,100 0,93" vector-effect="non-scaling-stroke" />
-      <line class="stripe" x1="0" y1="3" x2="90" y2="3" vector-effect="non-scaling-stroke" />
-    </svg>
-  );
-}
-
-function Keys({ pressed, press, enabled }: { pressed: Set<ButtonName>; press: (b: ButtonName, d: boolean) => void; enabled: boolean }) {
-  const key = (b: ButtonName, label: Key, text: string) => (
+/** The pixel-art device (ADR-0015), with the real canvas and real buttons placed on the drawing. */
+function DeviceView({
+  fitted,
+  canvas,
+  leds,
+  pressed,
+  press,
+  enabled,
+  tilted,
+  box,
+}: {
+  fitted: { geometry: Geometry; scale: number };
+  canvas: preact.RefObject<HTMLCanvasElement | null>;
+  leds: [number, number, number, number];
+  pressed: Set<ButtonName>;
+  press: (b: ButtonName, d: boolean) => void;
+  enabled: boolean;
+  tilted: boolean;
+  box: preact.RefObject<HTMLDivElement | null>;
+}) {
+  const { geometry: g, scale: s } = fitted;
+  const art = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = art.current?.getContext("2d");
+    if (!c) return;
+    const img = c.createImageData(g.width, g.height);
+    toRgba(drawShell(g), img.data);
+    c.putImageData(img, 0, 0);
+  }, [g.width, g.height]);
+  const at = (x: number, y: number, w: number, h: number) => ({
+    left: `${x * s}px`,
+    top: `${y * s}px`,
+    width: `${w * s}px`,
+    height: `${h * s}px`,
+  });
+  const cell = Math.floor((g.disc.r * 2) / 3);
+  const key = (b: ButtonName, label: Key, x: number, y: number, w: number, h: number, round = false) => (
     <button
       type="button"
-      class={`key ${b}${pressed.has(b) ? " held" : ""}`}
+      class={`key ${b}${round ? " round" : ""}${pressed.has(b) ? " held" : ""}`}
       data-button={b}
       aria-label={tr(label)}
       disabled={!enabled}
+      style={at(x, y, w, h)}
       onPointerDown={(e) => {
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         press(b, true);
       }}
       onPointerUp={() => press(b, false)}
       onPointerCancel={() => press(b, false)}
-    >
-      {text}
-    </button>
+    />
   );
+  const { cx, cy } = g.disc;
+  const half = Math.floor(cell / 2);
   return (
-    <div class="controls-area">
-      <div class="pad">
-        {key("up", "btnUp", "▲")}
-        {key("left", "btnLeft", "◀")}
-        {key("ok", "btnOk", "OK")}
-        {key("right", "btnRight", "▶")}
-        {key("down", "btnDown", "▼")}
-      </div>
-      {key("back", "btnBack", "↩")}
+    <div class={`device${tilted ? " tilted" : ""}`} ref={box} style={{ width: `${g.width * s}px`, height: `${g.height * s}px` }}>
+      <canvas class="art" ref={art} width={g.width} height={g.height} aria-hidden="true" />
+      <canvas class="lcd" ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" style={at(g.lcd.x, g.lcd.y, LCD_W, LCD_H)} />
+      <span
+        class="led"
+        aria-hidden="true"
+        style={{ ...at(g.led.x, g.led.y, 3, 3), background: `rgb(${leds[0]},${leds[1]},${leds[2]})` }}
+      />
+      {key("up", "btnUp", cx - half, cy - half - cell, cell, cell)}
+      {key("down", "btnDown", cx - half, cy + half, cell, cell)}
+      {key("left", "btnLeft", cx - half - cell, cy - half, cell, cell)}
+      {key("right", "btnRight", cx + half, cy - half, cell, cell)}
+      {key("ok", "btnOk", cx - half, cy - half, cell, cell, true)}
+      {key("back", "btnBack", g.back.cx - g.back.r, g.back.cy - g.back.r, g.back.r * 2, g.back.r * 2, true)}
     </div>
   );
 }
@@ -208,7 +240,8 @@ function Devices({
   ask: Ask;
 }) {
   return (
-    <Panel title={tr("devices")} open>
+    <section class="tab-section">
+      <h2>{tr("devices")}</h2>
       <div class="controls">
         <label>
           {tr("device")}{" "}
@@ -250,26 +283,6 @@ function Devices({
         >
           {tr("renameDevice")}
         </button>
-        <button type="button" disabled={!active} onClick={() => send({ type: "exportDevice" })}>
-          {tr("exportDevice")}
-        </button>
-        <label class="file-button">
-          {tr("importDevice")}
-          <input
-            type="file"
-            accept=".dryflash"
-            disabled={!active}
-            onChange={async (e) => {
-              const input = e.currentTarget as HTMLInputElement;
-              const f = input.files?.[0];
-              input.value = "";
-              if (f) {
-                const bytes = await f.arrayBuffer();
-                send({ type: "importDevice", bytes }, [bytes]);
-              }
-            }}
-          />
-        </label>
         <button
           type="button"
           disabled={!active}
@@ -301,16 +314,47 @@ function Devices({
       </div>
       <p class="hint">{firmware ? tr("firmwareOn").replace("{name}", firmware) : tr("noFirmwareOn")}</p>
       {active && <DeviceSettings device={active} send={send} />}
-    </Panel>
+    </section>
   );
 }
 
-function Panel({ title, open, children }: { title: string; open?: boolean; children: preact.ComponentChildren }) {
+type Tab = "device" | "update" | "files" | "backup" | "diagnostics";
+const TABS: [Tab, Key][] = [
+  ["device", "tabDevice"],
+  ["update", "tabUpdate"],
+  ["files", "tabFiles"],
+  ["backup", "tabBackup"],
+  ["diagnostics", "tabDiagnostics"],
+];
+
+function Tabs({ tab, setTab, badge }: { tab: Tab; setTab: (t: Tab) => void; badge: boolean }) {
+  const move = (e: KeyboardEvent) => {
+    const i = TABS.findIndex(([t]) => t === tab);
+    const next = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : -1;
+    if (next === -1 || !TABS[next]) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setTab(TABS[next][0]);
+    document.getElementById(`tab-${TABS[next][0]}`)?.focus();
+  };
   return (
-    <details class="panel" open={open}>
-      <summary>{title}</summary>
-      <div class="panel-body">{children}</div>
-    </details>
+    <div class="tabs" role="tablist" aria-label="dryflash" onKeyDown={move}>
+      {TABS.map(([t, label]) => (
+        <button
+          type="button"
+          role="tab"
+          id={`tab-${t}`}
+          aria-selected={tab === t}
+          aria-controls="tabpanel"
+          tabIndex={tab === t ? 0 : -1}
+          class={tab === t ? "tab on" : "tab"}
+          onClick={() => setTab(t)}
+        >
+          {tr(label)}
+          {t === "diagnostics" && badge && <span class="dot" aria-label={tr("crashPanel")} />}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -330,8 +374,12 @@ function CardFiles({
   ask: Ask;
 }) {
   const open = (p: string) => send({ type: "sdList", path: p });
+  useEffect(() => {
+    if (ready && entries === null) open("/");
+  }, [ready]);
   return (
-    <Panel title={tr("card")}>
+    <section class="tab-section">
+      <h2>{tr("files")}</h2>
       <p class="hint">{usage}</p>
       <div class="controls">
         <button type="button" disabled={!ready || path === "/"} onClick={() => open(parentPath(path))}>
@@ -386,11 +434,7 @@ function CardFiles({
       </div>
       <p class="hint">{tr("cardChanges")}</p>
       <p class="path">/ext{path === "/" ? "" : path}</p>
-      {entries === null ? (
-        <button type="button" disabled={!ready} onClick={() => open("/")}>
-          {tr("files")}
-        </button>
-      ) : entries.length === 0 ? (
+      {entries === null ? null : entries.length === 0 ? (
         <p class="hint">{tr("empty")}</p>
       ) : (
         <ul class="files">
@@ -432,7 +476,7 @@ function CardFiles({
           })}
         </ul>
       )}
-    </Panel>
+    </section>
   );
 }
 
@@ -479,6 +523,8 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [fetching, setFetching] = useState<string | null>(null);
   const [provenance, setProvenance] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [tab, setTab] = useState<Tab>("device");
+  const [fitted, setFitted] = useState(() => ({ geometry: landscape(), scale: 2 }));
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
   const send: Send = (m, transfer = []) => worker.current?.postMessage(m, transfer);
@@ -758,24 +804,24 @@ export function App({ embed = false }: { embed?: boolean }) {
     return () => window.removeEventListener("message", onCommand);
   }, []);
 
-  // The panel is always a whole multiple of its 128×64 pixels.
+  // The drawing and the panel keep to whole multiples of their pixels.
   useEffect(() => {
     const el = stage.current;
-    const c = canvas.current;
-    if (!el || !c) return;
-    const fit = () => {
-      const fullscreen = document.fullscreenElement === deviceBox.current;
-      const width = el.clientWidth - 40;
-      const height = fullscreen ? window.innerHeight - 280 : Infinity;
-      const scale = Math.max(1, Math.min(fullscreen ? 12 : 4, Math.floor(Math.min(width / LCD_W, height / LCD_H))));
-      c.style.width = `${LCD_W * scale}px`;
+    if (!el) return;
+    const update = () => {
+      const full = document.fullscreenElement === deviceBox.current;
+      setFitted(
+        full
+          ? fit(window.innerWidth, window.innerHeight, 12)
+          : fit(el.clientWidth, Infinity, 4),
+      );
     };
-    const ro = new ResizeObserver(fit);
+    const ro = new ResizeObserver(update);
     ro.observe(el);
-    document.addEventListener("fullscreenchange", fit);
+    document.addEventListener("fullscreenchange", update);
     return () => {
       ro.disconnect();
-      document.removeEventListener("fullscreenchange", fit);
+      document.removeEventListener("fullscreenchange", update);
     };
   }, []);
 
@@ -905,6 +951,9 @@ export function App({ embed = false }: { embed?: boolean }) {
   };
 
   const running = status?.running ?? false;
+  const cardUsage = `${tr("cardUsage")
+    .replace("{used}", ((status?.cardUsedBytes ?? cardUsed) / 1e6).toFixed(1))
+    .replace("{total}", (cardCapacity / 1e6).toFixed(0))} ${tr(`persist_${persistence}` as Key)}`;
   const hasFirmware = !!firmware;
 
   return (
@@ -921,114 +970,86 @@ export function App({ embed = false }: { embed?: boolean }) {
 
       <div class={embed ? "layout embed" : "layout"}>
         <section class="stage" ref={stage} aria-label={tr("device")}>
-          <div class="device" ref={deviceBox}>
-            <Shell />
-            <div class="device-top" aria-hidden="true">
-              <span class="led" style={{ background: `rgb(${leds[0]},${leds[1]},${leds[2]})` }} />
-              <span class="brand">dryflash</span>
-              <span class="grille">
-                <i />
-                <i />
-                <i />
-              </span>
-            </div>
-            <div class="bezel">
-              <canvas ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" />
-            </div>
-            <Keys pressed={pressed} press={press} enabled={hasFirmware} />
-          </div>
-          {fetching && <p class="meter" role="status">{fetching}</p>}
-          {embed && error && <p class="error" role="alert">{error}</p>}
-          {!embed && <div class="toolbar">
-            <button type="button" disabled={!hasFirmware} onClick={() => send({ type: "control", action: "reset" })}>
-              {tr("reset")}
-            </button>
-            <button
-              type="button"
-              disabled={!hasFirmware}
-              onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}
-            >
-              {running ? tr("pause") : tr("resume")}
-            </button>
-            <label>
-              <input
-                type="checkbox"
-                checked={turbo}
-                onChange={(e) => {
-                  const on = (e.currentTarget as HTMLInputElement).checked;
-                  setTurbo(on);
-                  send({ type: "turbo", on });
-                }}
-              />{" "}
-              {tr("turbo")}
-            </label>
-            <button type="button" disabled={!hasFirmware} onClick={screenshot}>
-              {tr("screenshot")}
-            </button>
-            <button type="button" disabled={!hasFirmware || recording === "gif"} onClick={toggleWebm}>
-              {recording === "webm" ? tr("stopRecording") : tr("recordWebm")}
-            </button>
-            <button type="button" disabled={!hasFirmware || recording === "webm"} onClick={toggleGif} title={tr("gifLimit")}>
-              {recording === "gif" ? tr("stopRecording") : tr("recordGif")}
-            </button>
-            <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
-              {tr("fullscreen")}
-            </button>
-            <label>
-              <input
-                type="checkbox"
-                checked={ghosting}
-                onChange={(e) => toggleGhosting((e.currentTarget as HTMLInputElement).checked)}
-              />{" "}
-              {tr("ghosting")}
-            </label>
-          </div>}
-          {recording && (
-            <p class="hint rec" role="status">
-              {tr("recording")}
+          <DeviceView
+            fitted={fitted}
+            canvas={canvas}
+            leds={leds}
+            pressed={pressed}
+            press={press}
+            enabled={hasFirmware}
+            tilted={!hasFirmware && !embed}
+            box={deviceBox}
+          />
+          {fetching && (
+            <p class="meter" role="status">
+              {fetching}
             </p>
           )}
-          {status && (
-            <p class="meter">
-              {running ? tr("running") : tr("paused")} · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
-              {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
+          {embed && error && (
+            <p class="error" role="alert">
+              {error}
             </p>
           )}
-          {!embed && <p class="hint">{tr("keyboard")}</p>}
         </section>
 
-        {!embed && <div class="panels">
-          <Panel title={tr("firmwarePanel")} open>
-            <label class="drop">
-              <span>{ready ? tr("drop") : tr("starting")}</span>
-              <input
-                type="file"
-                accept=".dfu,.tgz"
-                disabled={!ready}
-                onChange={(e) => {
-                  const f = (e.currentTarget as HTMLInputElement).files?.[0];
-                  if (f) void load(f);
-                }}
-              />
-              <span class="choose">{tr("choose")}</span>
-            </label>
-            <p class="hint">{tr("privacy")}</p>
-            {provenance && <p class="hint">{provenance}</p>}
-            {installed && <p class="hint">{installed}</p>}
-            <label>
-              <input
-                type="checkbox"
-                checked={ota}
+        {!embed && (
+          <>
+            <div class="toolbar">
+              <button type="button" disabled={!hasFirmware} onClick={() => send({ type: "control", action: "reset" })}>
+                {tr("reset")}
+              </button>
+              <button
+                type="button"
                 disabled={!hasFirmware}
-                onChange={(e) => {
-                  const on = (e.currentTarget as HTMLInputElement).checked;
-                  setOta(on);
-                  otaRef.current = on;
-                }}
-              />{" "}
-              {tr("otaMode")}
-            </label>
-            <p class="hint">{tr("otaNote")}</p>
+                onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}
+              >
+                {running ? tr("pause") : tr("resume")}
+              </button>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={turbo}
+                  onChange={(e) => {
+                    const on = (e.currentTarget as HTMLInputElement).checked;
+                    setTurbo(on);
+                    send({ type: "turbo", on });
+                  }}
+                />{" "}
+                {tr("turbo")}
+              </label>
+              <button type="button" disabled={!hasFirmware} onClick={screenshot}>
+                {tr("screenshot")}
+              </button>
+              <button type="button" disabled={!hasFirmware || recording === "gif"} onClick={toggleWebm}>
+                {recording === "webm" ? tr("stopRecording") : tr("recordWebm")}
+              </button>
+              <button type="button" disabled={!hasFirmware || recording === "webm"} onClick={toggleGif} title={tr("gifLimit")}>
+                {recording === "gif" ? tr("stopRecording") : tr("recordGif")}
+              </button>
+              <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
+                {tr("fullscreen")}
+              </button>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ghosting}
+                  onChange={(e) => toggleGhosting((e.currentTarget as HTMLInputElement).checked)}
+                />{" "}
+                {tr("ghosting")}
+              </label>
+            </div>
+            {recording && (
+              <p class="hint rec" role="status">
+                {tr("recording")}
+              </p>
+            )}
+            {status && (
+              <p class="meter">
+                {running ? tr("running") : tr("paused")} · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
+                {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
+              </p>
+            )}
+            <p class="hint">{tr("keyboard")}</p>
             {error && (
               <p class="error" role="alert">
                 {tr("error")}: {error}
@@ -1037,62 +1058,174 @@ export function App({ embed = false }: { embed?: boolean }) {
             {stop && (
               <div class="error" role="alert">
                 <strong>{tr("stopped")}:</strong> {stop.reason}
-                <details>
-                  <summary>{tr("digest")}</summary>
-                  <pre>{stop.digest}</pre>
-                </details>
               </div>
             )}
-          </Panel>
 
-          <Devices devices={devices} active={active} firmware={firmware} send={send} ask={setQuestion} />
+            <Tabs tab={tab} setTab={setTab} badge={crashes.length > 0 || !!stop} />
+            <div class="tabpanel" id="tabpanel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
+              {tab === "device" && (
+                <>
+                  <section class="tab-section">
+                    <h2>{tr("deviceInfo")}</h2>
+                    <dl class="info">
+                      <dt>{tr("firmware")}</dt>
+                      <dd>{firmware ?? tr("noFirmwareOn")}</dd>
+                      <dt>{tr("deviceName")}</dt>
+                      <dd>{active?.board.name}</dd>
+                      <dt>{tr("region")}</dt>
+                      <dd>{active && tr(`region${active.board.region}` as Key)}</dd>
+                      <dt>{tr("batteryCharge")}</dt>
+                      <dd>{active?.battery.percent}%</dd>
+                      <dt>{tr("card")}</dt>
+                      <dd>{cardUsage}</dd>
+                    </dl>
+                  </section>
+                  <Devices devices={devices} active={active} firmware={firmware} send={send} ask={setQuestion} />
+                </>
+              )}
 
-          <CardFiles
-            usage={`${tr("cardUsage")
-              .replace("{used}", ((status?.cardUsedBytes ?? cardUsed) / 1e6).toFixed(1))
-              .replace("{total}", (cardCapacity / 1e6).toFixed(0))} ${tr(`persist_${persistence}` as Key)}`}
-            path={listing.path}
-            entries={listing.entries}
-            ready={ready}
-            send={send}
-            ask={setQuestion}
+              {tab === "update" && (
+                <section class="tab-section">
+                  <h2>{tr("firmwarePanel")}</h2>
+                  <fieldset class="modes" disabled={!hasFirmware}>
+                    <legend>{tr("installMode")}</legend>
+                    <label>
+                      <input
+                        type="radio"
+                        name="mode"
+                        checked={!ota}
+                        onChange={() => {
+                          setOta(false);
+                          otaRef.current = false;
+                        }}
+                      />{" "}
+                      {tr("quickMode")}
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="mode"
+                        checked={ota}
+                        onChange={() => {
+                          setOta(true);
+                          otaRef.current = true;
+                        }}
+                      />{" "}
+                      {tr("otaMode")}
+                    </label>
+                  </fieldset>
+                  <p class="hint">{tr("quickNote")}</p>
+                  <p class="hint">{tr("otaNote")}</p>
+                  {provenance && <p class="hint">{provenance}</p>}
+                  {installed && <p class="hint">{installed}</p>}
+                </section>
+              )}
+
+              {tab === "files" && (
+                <CardFiles
+                  usage={cardUsage}
+                  path={listing.path}
+                  entries={listing.entries}
+                  ready={ready}
+                  send={send}
+                  ask={setQuestion}
+                />
+              )}
+
+              {tab === "backup" && (
+                <section class="tab-section">
+                  <h2>{tr("tabBackup")}</h2>
+                  <p class="hint">{tr("backupNote")}</p>
+                  <div class="controls">
+                    <button type="button" disabled={!active} onClick={() => send({ type: "exportDevice" })}>
+          {tr("exportDevice")}
+        </button>
+        <label class="file-button">
+          {tr("importDevice")}
+          <input
+            type="file"
+            accept=".dryflash"
+            disabled={!active}
+            onChange={async (e) => {
+              const input = e.currentTarget as HTMLInputElement;
+              const f = input.files?.[0];
+              input.value = "";
+              if (f) {
+                const bytes = await f.arrayBuffer();
+                send({ type: "importDevice", bytes }, [bytes]);
+              }
+            }}
           />
+        </label>
+                  </div>
+                </section>
+              )}
 
-          <Panel title={tr("crashPanel")} open={crashes.length > 0}>
-            {crashes.length === 0 && !stop?.crashes.length ? (
-              <p class="hint">{tr("noCrashes")}</p>
-            ) : (
-              <ul class="crashes">
-                {(crashes.length ? crashes : (stop?.crashes ?? [])).map((c) => (
-                  <li>
-                    {(c.atMs / 1000).toFixed(3)} s — {c.message}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
+              {tab === "diagnostics" && (
+                <>
+                  <section class="tab-section">
+                    <h2>{tr("crashPanel")}</h2>
+                    {crashes.length === 0 && !stop?.crashes.length ? (
+                      <p class="hint">{tr("noCrashes")}</p>
+                    ) : (
+                      <ul class="crashes">
+                        {(crashes.length ? crashes : (stop?.crashes ?? [])).map((c) => (
+                          <li>
+                            {(c.atMs / 1000).toFixed(3)} s — {c.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {stop && (
+                      <details>
+                        <summary>{tr("digest")}</summary>
+                        <pre>{stop.digest}</pre>
+                      </details>
+                    )}
+                  </section>
+                  <section class="tab-section">
+                    <h2>{tr("log")}</h2>
+                    <pre class="log">{log}</pre>
+                  </section>
+                  <section class="tab-section">
+                    <h2>{tr("eventsPanel")}</h2>
+                    <p class="hint">{tr("moreEventsLater")}</p>
+                    {events.length === 0 ? (
+                      <p class="hint">{tr("noEvents")}</p>
+                    ) : (
+                      <ul class="events">
+                        {events.map((e) => (
+                          <li>{e}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                  <section class="tab-section">
+                    <h2>{tr("fidelity")}</h2>
+                    <Fidelity rows={fidelity} />
+                  </section>
+                </>
+              )}
+            </div>
 
-          <Panel title={tr("eventsPanel")}>
-            <p class="hint">{tr("moreEventsLater")}</p>
-            {events.length === 0 ? (
-              <p class="hint">{tr("noEvents")}</p>
-            ) : (
-              <ul class="events">
-                {events.map((e) => (
-                  <li>{e}</li>
-                ))}
-              </ul>
-            )}
-          </Panel>
-
-          <Panel title={tr("log")}>
-            <pre class="log">{log}</pre>
-          </Panel>
-
-          <Panel title={tr("fidelity")}>
-            <Fidelity rows={fidelity} />
-          </Panel>
-        </div>}
+            <label class="drop">
+              <span>{ready ? tr("drop") : tr("starting")}</span>
+              <input
+                type="file"
+                accept=".dfu,.tgz"
+                disabled={!ready}
+                onChange={(e) => {
+                  const input = e.currentTarget as HTMLInputElement;
+                  const f = input.files?.[0];
+                  input.value = "";
+                  if (f) void load(f);
+                }}
+              />
+              <span class="choose">{tr("choose")}</span>
+              <span class="hint">{tr("privacy")}</span>
+            </label>
+          </>
+        )}
       </div>
 
       <AskDialog question={question} close={() => setQuestion(null)} />

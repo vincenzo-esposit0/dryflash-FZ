@@ -621,3 +621,22 @@ once not tested; wasm CPU benchmark still below its M0 figure.
 - Expected noise: when a host has no CORS the browser logs the failed direct attempt before the proxy works.
 - **Not tested:** the proxy deployed on Cloudflare (edge cache, rate limit, `CF-Connecting-IP`); `elf` and
   `mode=ota` through a link; embedding from another origin (the test frame was same-origin).
+
+### Checkpoint 3b — pixel-art device and tabs (ADR-0015)
+
+- `web/src/ui/shell.ts` draws the device by code, on the LCD's own pixel grid: real device's silhouette by
+  the maintainer's decision, "dryflash" on the body, no mascot, nothing taken from the reference picture.
+  Landscape where it fits at 2× or more, stacked on phones. Whole-number scales only. The screen and
+  buttons are the real canvas and real `<button>`s placed on the drawing.
+- With no firmware the device rests tilted in perspective; it straightens when a firmware starts. Reduced
+  motion: always straight.
+- The page follows how qFlipper is used, not its graphics: tabs for device information and virtual
+  devices, update (quick install or Real OTA), files, backup, diagnostics. The panels of checkpoint 2 are
+  gone. Tabs follow the ARIA pattern, with arrow keys.
+- Verified in a browser (dev server): tilted without firmware, straight with it; Back, OK and Down through
+  the drawn pad reach the firmware's menu; at 375 px the device stacks, no horizontal scroll; hit areas 42 px
+  on the pad, 36 px for Back at 2×.
+- **The `RangeError: Invalid typed array length: 144115188075855870` came back**, once, on the first load after
+  starting the dev server with a wasm rebuilt since the last one (now "in promise"). Fast navigation and
+  reloads did not produce it, and the page worked normally afterwards. Still only the stale `.js`/`.wasm`
+  guess: cause not proven. The E2E suite runs on the production build and fails on console errors.
