@@ -79,7 +79,7 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 - ☑ Screenshot, GIF/WebM recording
 - ☑ `?fw=` / `?elf=` / `mode` / `autoboot` / `device` URL loading + `/proxy` (live with the next deploy)
 - ☑ `/embed` + embed API + `docs/EMBED.md` + "Try in browser" badge; `/compat` (by hand until M6) and `/about`
-- ☑ Pixel-art device following the real silhouette, tabs modelled on qFlipper's use (ADR-0015)
+- ☑ Pixel-art device modelled on the real one, tabs modelled on qFlipper's use (ADR-0015)
 - ☐ i18n (en, it), accessibility pass, reduced motion
 
 **DoD:** E2E suite green on Chrome/Firefox/WebKit; Hub "Try in emulator" link works.

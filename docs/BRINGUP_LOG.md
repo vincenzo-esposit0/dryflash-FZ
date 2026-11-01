@@ -624,18 +624,17 @@ once not tested; wasm CPU benchmark still below its M0 figure.
 
 ### Checkpoint 3b — pixel-art device and tabs (ADR-0015)
 
-- `web/src/ui/shell.ts` draws the device by code, on the LCD's own pixel grid: real device's silhouette by
-  the maintainer's decision, "dryflash" on the body, no mascot, nothing taken from the reference picture.
-  Landscape where it fits at 2× or more, stacked on phones. Whole-number scales only. The screen and
-  buttons are the real canvas and real `<button>`s placed on the drawing.
-- With no firmware the device rests tilted in perspective; it straightens when a firmware starts. Reduced
-  motion: always straight.
+- `web/src/ui/shell.ts` rasterizes the device from a model: a projective map and an extrusion, with art pixels
+  aligned to the screen, as in the maintainer's reference picture. Thick body, bevels, "FL1PP3R" on it by the
+  maintainer's choice, sky-blue stage. A first version, a flat drawing tilted by CSS with "dryflash" on it, was
+  rejected: rotating the pixels loses the look. The real canvas and `<button>`s sit on the same face through the
+  same map in a CSS `matrix3d`. Angled from 600 px of width; a "Front view" tick, remembered; stacked on phones.
 - The page follows how qFlipper is used, not its graphics: tabs for device information and virtual
   devices, update (quick install or Real OTA), files, backup, diagnostics. The panels of checkpoint 2 are
   gone. Tabs follow the ARIA pattern, with arrow keys.
-- Verified in a browser (dev server): tilted without firmware, straight with it; Back, OK and Down through
-  the drawn pad reach the firmware's menu; at 375 px the device stacks, no horizontal scroll; hit areas 42 px
-  on the pad, 36 px for Back at 2×.
+- Verified in a browser (dev server): firmware on the angled, front and stacked views; mouse clicks reach the
+  firmware; `elementFromPoint` at the centre of all six keys finds that key in perspective; at 375 px no horizontal
+  scroll. The screen reads at about 2× when angled at 600 px of width. Fullscreen not checked.
 - **The `RangeError: Invalid typed array length: 144115188075855870` came back**, once, on the first load after
   starting the dev server with a wasm rebuilt since the last one (now "in promise"). Fast navigation and
   reloads did not produce it, and the page worked normally afterwards. Still only the stale `.js`/`.wasm`

@@ -175,7 +175,7 @@ Detect and report, with timestamps in virtual time:
 - `/about` — how it works, hardware fidelity table, disclaimer, credits, licences.
 
 **Main screen layout**
-- Centre: a **pixel-art device illustration** containing the LCD canvas and the buttons, following the real device's general silhouette by the maintainer's decision (ADR-0015). Do NOT use Flipper Devices' artwork, wordmark or mascot: the body says dryflash.
+- Centre: a **pixel-art device illustration** containing the LCD canvas and the buttons, modelled on the real device by the maintainer's decision (ADR-0015). Do NOT use Flipper Devices' artwork or mascot. The product's name stays dryflash; the word on the drawn body is the maintainer's choice, in ADR-0015.
 - LCD: crisp pixel scaling (integer scale, `image-rendering: pixelated`), authentic orange backlight tone, backlight level from the LP5562 model, optional "LCD ghosting" effect toggle.
 - Left/right panels (collapsible; bottom sheet on mobile): Firmware (load, info, install mode), Virtual device (OTP settings, battery, USB), SD card file manager (browse, upload `.sub/.nfc/.ir/.fap/...`, download, format), Event log (IR TX, LED, vibro, GPIO), Hardware fidelity, Crash report.
 - Toolbar: Power/Reset, Reboot to DFU (if modelled), Pause/Resume, Turbo, Screenshot (PNG at 4× scale), **Record GIF/WebM** (for sharing on social — important for community growth), Mute, Fullscreen.

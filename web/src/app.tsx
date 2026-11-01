@@ -19,7 +19,7 @@ import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
 import { Fidelity } from "./pages";
 import { SiteFooter, SiteHeader } from "./ui/chrome";
-import { drawShell, fit, landscape, toRgba, type Geometry } from "./ui/shell";
+import { drawView, faceMatrix, fitView, toRgba, type View } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
 const locale = detectLocale(navigator.languages ?? [navigator.language]);
@@ -87,42 +87,40 @@ interface Stop {
   digest: string;
 }
 
-/** The pixel-art device (ADR-0015), with the real canvas and real buttons placed on the drawing. */
+/** The pixel-art device (ADR-0015), with the real canvas and buttons on its face, in perspective. */
 function DeviceView({
-  fitted,
+  view,
   canvas,
   leds,
   pressed,
   press,
   enabled,
-  tilted,
   box,
 }: {
-  fitted: { geometry: Geometry; scale: number };
+  view: View;
   canvas: preact.RefObject<HTMLCanvasElement | null>;
   leds: [number, number, number, number];
   pressed: Set<ButtonName>;
   press: (b: ButtonName, d: boolean) => void;
   enabled: boolean;
-  tilted: boolean;
   box: preact.RefObject<HTMLDivElement | null>;
 }) {
-  const { geometry: g, scale: s } = fitted;
+  const m = view.model;
   const art = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = art.current?.getContext("2d");
     if (!c) return;
-    const img = c.createImageData(g.width, g.height);
-    toRgba(drawShell(g), img.data);
+    const img = c.createImageData(view.width, view.height);
+    toRgba(drawView(view), img.data);
     c.putImageData(img, 0, 0);
-  }, [g.width, g.height]);
+  }, [view]);
   const at = (x: number, y: number, w: number, h: number) => ({
-    left: `${x * s}px`,
-    top: `${y * s}px`,
-    width: `${w * s}px`,
-    height: `${h * s}px`,
+    left: `${x}px`,
+    top: `${y}px`,
+    width: `${w}px`,
+    height: `${h}px`,
   });
-  const cell = Math.floor((g.disc.r * 2) / 3);
+  const cell = Math.floor((m.disc.r * 2) / 3);
   const key = (b: ButtonName, label: Key, x: number, y: number, w: number, h: number, round = false) => (
     <button
       type="button"
@@ -139,23 +137,28 @@ function DeviceView({
       onPointerCancel={() => press(b, false)}
     />
   );
-  const { cx, cy } = g.disc;
+  const { cx, cy } = m.disc;
   const half = Math.floor(cell / 2);
   return (
-    <div class={`device${tilted ? " tilted" : ""}`} ref={box} style={{ width: `${g.width * s}px`, height: `${g.height * s}px` }}>
-      <canvas class="art" ref={art} width={g.width} height={g.height} aria-hidden="true" />
-      <canvas class="lcd" ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" style={at(g.lcd.x, g.lcd.y, LCD_W, LCD_H)} />
-      <span
-        class="led"
-        aria-hidden="true"
-        style={{ ...at(g.led.x, g.led.y, 3, 3), background: `rgb(${leds[0]},${leds[1]},${leds[2]})` }}
-      />
-      {key("up", "btnUp", cx - half, cy - half - cell, cell, cell)}
-      {key("down", "btnDown", cx - half, cy + half, cell, cell)}
-      {key("left", "btnLeft", cx - half - cell, cy - half, cell, cell)}
-      {key("right", "btnRight", cx + half, cy - half, cell, cell)}
-      {key("ok", "btnOk", cx - half, cy - half, cell, cell, true)}
-      {key("back", "btnBack", g.back.cx - g.back.r, g.back.cy - g.back.r, g.back.r * 2, g.back.r * 2, true)}
+    <div class="device" ref={box} style={{ width: `${view.width * view.cell}px`, height: `${view.height * view.cell}px` }}>
+      <canvas class="art" ref={art} width={view.width} height={view.height} aria-hidden="true" />
+      <div
+        class="face"
+        style={{ width: `${m.width}px`, height: `${m.height}px`, transform: faceMatrix(view.matrix, view.cell) }}
+      >
+        <canvas class="lcd" ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" style={at(m.lcd.x, m.lcd.y, LCD_W, LCD_H)} />
+        <span
+          class="led"
+          aria-hidden="true"
+          style={{ ...at(m.led.x, m.led.y, 4, 4), background: `rgb(${leds[0]},${leds[1]},${leds[2]})` }}
+        />
+        {key("up", "btnUp", cx - half, cy - half - cell, cell, cell)}
+        {key("down", "btnDown", cx - half, cy + half, cell, cell)}
+        {key("left", "btnLeft", cx - half - cell, cy - half, cell, cell)}
+        {key("right", "btnRight", cx + half, cy - half, cell, cell)}
+        {key("ok", "btnOk", cx - half, cy - half, cell, cell, true)}
+        {key("back", "btnBack", m.back.cx - m.back.r, m.back.cy - m.back.r, m.back.r * 2, m.back.r * 2, true)}
+      </div>
     </div>
   );
 }
@@ -524,7 +527,16 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [provenance, setProvenance] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [tab, setTab] = useState<Tab>("device");
-  const [fitted, setFitted] = useState(() => ({ geometry: landscape(), scale: 2 }));
+  const [view, setView] = useState<View>(() => fitView(800));
+  const [front, setFront] = useState(() => {
+    try {
+      return localStorage.getItem("dryflash.front") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const frontRef = useRef(front);
+  const updateView = useRef<() => void>(() => {});
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
   const send: Send = (m, transfer = []) => worker.current?.postMessage(m, transfer);
@@ -810,12 +822,13 @@ export function App({ embed = false }: { embed?: boolean }) {
     if (!el) return;
     const update = () => {
       const full = document.fullscreenElement === deviceBox.current;
-      setFitted(
+      setView(
         full
-          ? fit(window.innerWidth, window.innerHeight, 12)
-          : fit(el.clientWidth, Infinity, 4),
+          ? fitView(window.innerWidth, window.innerHeight, frontRef.current, 12)
+          : fitView(el.clientWidth - 16, Infinity, frontRef.current),
       );
     };
+    updateView.current = update;
     const ro = new ResizeObserver(update);
     ro.observe(el);
     document.addEventListener("fullscreenchange", update);
@@ -971,13 +984,12 @@ export function App({ embed = false }: { embed?: boolean }) {
       <div class={embed ? "layout embed" : "layout"}>
         <section class="stage" ref={stage} aria-label={tr("device")}>
           <DeviceView
-            fitted={fitted}
+            view={view}
             canvas={canvas}
             leds={leds}
             pressed={pressed}
             press={press}
             enabled={hasFirmware}
-            tilted={!hasFirmware && !embed}
             box={deviceBox}
           />
           {fetching && (
@@ -1029,6 +1041,24 @@ export function App({ embed = false }: { embed?: boolean }) {
               <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
                 {tr("fullscreen")}
               </button>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={front}
+                  onChange={(e) => {
+                    const on = (e.currentTarget as HTMLInputElement).checked;
+                    setFront(on);
+                    frontRef.current = on;
+                    try {
+                      localStorage.setItem("dryflash.front", on ? "1" : "0");
+                    } catch {
+                      // A remembered preference only: the view still changes.
+                    }
+                    updateView.current();
+                  }}
+                />{" "}
+                {tr("frontView")}
+              </label>
               <label>
                 <input
                   type="checkbox"

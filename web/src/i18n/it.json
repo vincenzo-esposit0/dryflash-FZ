@@ -145,5 +145,6 @@
   "installMode": "Come installare i pacchetti",
   "quickMode": "Installazione rapida",
   "quickNote": "Installazione rapida: il firmware va direttamente in flash e le risorse sulla scheda.",
-  "backupNote": "Un solo file con firmware, scheda e impostazioni di questo dispositivo. Importandolo si crea un dispositivo nuovo."
+  "backupNote": "Un solo file con firmware, scheda e impostazioni di questo dispositivo. Importandolo si crea un dispositivo nuovo.",
+  "frontView": "Vista frontale"
 }
