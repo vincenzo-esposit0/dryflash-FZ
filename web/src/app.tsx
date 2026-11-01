@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ButtonName, CrashRecord, FidelityRow, FromWorker, Status, ToWorker } from "./emu/protocol";
+import type { Persistence } from "./emu/cardstore";
 import { detectLocale, t, type Key } from "./i18n";
 import { stripAnsi } from "./ui/ansi";
 import { buttonForKey } from "./ui/keys";
@@ -24,6 +25,9 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [fidelity, setFidelity] = useState<FidelityRow[]>([]);
   const [firmware, setFirmware] = useState<string | null>(null);
+  const [persistence, setPersistence] = useState<Persistence>("none");
+  const [cardCapacity, setCardCapacity] = useState(0);
+  const [installed, setInstalled] = useState<string | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [leds, setLeds] = useState<[number, number, number, number]>([0, 0, 0, 0]);
   const [log, setLog] = useState("");
@@ -53,10 +57,17 @@ export function App() {
       switch (m.type) {
         case "ready":
           setFidelity(m.fidelity);
+          setPersistence(m.persistence);
+          setCardCapacity(m.cardCapacityBytes);
           setReady(true);
           break;
         case "loaded":
           setFirmware(m.name);
+          setInstalled(
+            m.packageInfo
+              ? tr("installed").replace("{files}", String(m.packageInfo.files)).replace("{info}", m.packageInfo.info)
+              : null,
+          );
           setLog("");
           setStop(null);
           setError(null);
@@ -95,11 +106,22 @@ export function App() {
         w.removeEventListener("message", onReady);
         void fetch(fw)
           .then((r) => r.arrayBuffer())
-          .then((bytes) => w.postMessage({ type: "load", name: fw.split("/").pop()!, bytes, cpu2Start: 0 }, [bytes]));
+          .then((bytes) => w.postMessage({ type: "load", name: fw.split("/").pop()!, bytes }, [bytes]));
       };
       w.addEventListener("message", onReady);
     }
-    return () => w.terminate();
+    // Written blocks are saved about once a second; save the rest when the page goes away.
+    const flush = () => w.postMessage({ type: "flush" } satisfies ToWorker);
+    const onHide = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      w.terminate();
+    };
   }, []);
 
   const press = (b: ButtonName, down: boolean) => {
@@ -137,13 +159,8 @@ export function App() {
 
   const load = async (file: File) => {
     setError(null);
-    if (/\.tgz$/i.test(file.name)) {
-      setError(tr("tgzLater"));
-      return;
-    }
     const bytes = await file.arrayBuffer();
-    // A bare .dfu does not say where the CPU2 region starts; the update package does (M4).
-    send({ type: "load", name: file.name, bytes, cpu2Start: 0 }, [bytes]);
+    send({ type: "load", name: file.name, bytes }, [bytes]);
   };
 
   const onDrop = (e: DragEvent) => {
@@ -223,6 +240,7 @@ export function App() {
           <span class="choose">{tr("choose")}</span>
         </label>
         <p class="hint">{tr("privacy")}</p>
+        {installed && <p class="hint">{installed}</p>}
         <div class="controls">
           <button
             type="button"
@@ -277,6 +295,27 @@ export function App() {
             </details>
           </div>
         )}
+      </section>
+
+      <section>
+        <h2>{tr("card")}</h2>
+        <p class="hint">
+          {tr("cardUsage")
+            .replace("{used}", ((status?.cardUsedBytes ?? 0) / 1e6).toFixed(1))
+            .replace("{total}", (cardCapacity / 1e6).toFixed(0))}{" "}
+          {tr(`persist_${persistence}` as Key)}
+        </p>
+        <div class="controls">
+          <button
+            type="button"
+            disabled={!ready}
+            onClick={() => {
+              if (confirm(tr("eraseConfirm"))) send({ type: "eraseCard" });
+            }}
+          >
+            {tr("eraseCard")}
+          </button>
+        </div>
       </section>
 
       <section>

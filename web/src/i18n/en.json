@@ -1,13 +1,12 @@
 {
   "tagline": "Try any Flipper Zero firmware in your browser before flashing it to your real device.",
-  "status": "Pre-alpha (milestone M3). The real firmware runs instruction by instruction; see the hardware fidelity table for what is emulated, simulated or missing.",
+  "status": "Pre-alpha (milestone M4). The real firmware runs instruction by instruction; see the hardware fidelity table for what is emulated, simulated or missing.",
   "positioning": "dryflash is a smoke test, not a hardware certification. It catches boot failures, crashes, faults, hangs and broken UI flows. It does not reproduce real RF, NFC/RFID physics, BLE, power behaviour or exact timing. Passing in the emulator does not guarantee the firmware works on hardware.",
   "disclaimer": "Not affiliated with or endorsed by Flipper Devices Inc. Flipper Zero is a trademark of its respective owner. For educational and authorised security research only.",
   "source": "Source code (GPL-3.0-or-later)",
-  "drop": "Drop a firmware .dfu here",
-  "choose": "Choose a .dfu file",
+  "drop": "Drop a firmware .tgz or .dfu here",
+  "choose": "Choose a file",
   "privacy": "The file stays in your browser: nothing is uploaded.",
-  "tgzLater": "Update packages (.tgz) are supported from milestone M4. For now, extract firmware.dfu from the package.",
   "starting": "Loading the emulator…",
   "noFirmware": "No firmware loaded.",
   "running": "Running",
@@ -40,5 +39,13 @@
   "stopped": "Emulation stopped",
   "crashes": "Firmware crashes",
   "digest": "Bring-up digest",
-  "error": "Error"
+  "error": "Error",
+  "installed": "Quick install: {files} files from package {info} put on the card.",
+  "card": "SD card",
+  "cardUsage": "{used} MB used of {total} MB.",
+  "persist_opfs": "Saved in this browser.",
+  "persist_indexeddb": "Saved in this browser (IndexedDB).",
+  "persist_none": "Not saved: it is lost when you close this page. Another tab may have the card open, or this browser blocks storage.",
+  "eraseCard": "Erase card",
+  "eraseConfirm": "Erase the whole virtual SD card? Everything on it is lost, including the device's saved settings. The device restarts."
 }

@@ -4,12 +4,24 @@
 //! (no serde dependency); 64-bit counters are returned as `f64` (exact below 2^53).
 
 use dryflash_core::board::Button;
+use dryflash_core::board::fat32;
+use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
 use dryflash_core::bus::Fidelity;
 use dryflash_core::loader::dfu;
+use dryflash_core::loader::package::{Package, install_resources};
 use dryflash_core::machine::{Machine, RunExit};
 use wasm_bindgen::prelude::*;
 
 pub use dryflash_core::VERSION;
+
+/// Virtual card capacity: 1 GiB, sparse (ADR-0013).
+const CARD_BLOCKS: u32 = 2_097_152;
+/// Volume serial of a new card; fixed so that runs are reproducible.
+const CARD_SERIAL: u32 = 0x4446_0001;
+/// Host record of one block: LBA (little-endian) and its data.
+const RECORD: usize = 4 + BLOCK_SIZE;
+/// The hardware target this emulator models (`Target` in update.fuf).
+const TARGET_F7: u32 = 7;
 
 #[wasm_bindgen]
 pub fn version() -> String {
@@ -35,6 +47,22 @@ pub struct Emulator {
     log_read: usize,
     /// Description of the last non-budget exit.
     last_stop: String,
+}
+
+impl Emulator {
+    /// A powered-off machine that keeps the device's settings and its card, whose protocol state
+    /// restarts while the data stays.
+    fn fresh_machine(&mut self) -> Machine {
+        let mut m = Machine::new();
+        m.bus.legacy_sleep = self.m.bus.legacy_sleep;
+        if let Some(old) = self.m.bus.periphs.remove_sd() {
+            let mut card = SdCard::new(old.capacity_blocks(), BlockStore::default());
+            card.store = old.store;
+            card.unsupported = old.unsupported;
+            m.bus.periphs.insert_sd(card);
+        }
+        m
+    }
 }
 
 impl Default for Emulator {
@@ -76,11 +104,91 @@ impl Emulator {
     pub fn load_dfu(&mut self, bytes: &[u8], cpu2_start: u32) -> Result<(), String> {
         let image = dfu::parse(bytes).map_err(|e| format!("not a valid DfuSe file: {e}"))?;
         let cpu2 = (cpu2_start != 0).then_some(cpu2_start);
-        self.m = Machine::new();
-        self.m.load_dfu(&image, cpu2).map_err(|e| e.to_string())?;
+        // Checked on a scratch machine first: a rejected image must not touch the running one.
+        Machine::new().load_dfu(&image, cpu2).map_err(|e| e.to_string())?;
+        let mut m = self.fresh_machine();
+        m.load_dfu(&image, cpu2).map_err(|e| e.to_string())?;
+        self.m = m;
         self.image = Some(image);
         self.cpu2_start = cpu2;
         Ok(())
+    }
+
+    /// Quick install of an update package: its firmware into flash, its resources on the card.
+    /// Returns `{"info", "files"}` as JSON, or an error message.
+    pub fn load_tgz(&mut self, bytes: &[u8]) -> Result<String, String> {
+        let pkg = Package::parse(bytes).map_err(|e| e.to_string())?;
+        if pkg.manifest.target != TARGET_F7 {
+            return Err(format!("package is for target {}, not f7", pkg.manifest.target));
+        }
+        let image = dfu::parse(pkg.firmware()).map_err(|e| format!("firmware in the package: {e}"))?;
+        let entries = pkg.resources().map_err(|e| e.to_string())?;
+        Machine::new()
+            .load_dfu(&image, pkg.manifest.radio_address)
+            .map_err(|e| e.to_string())?;
+        let card = self.m.bus.periphs.sd.as_mut().ok_or("no card")?;
+        let files = install_resources(&entries, &mut card.store).map_err(|e| e.to_string())?;
+        let mut m = self.fresh_machine();
+        m.load_dfu(&image, pkg.manifest.radio_address)
+            .map_err(|e| e.to_string())?;
+        self.m = m;
+        self.image = Some(image);
+        self.cpu2_start = pkg.manifest.radio_address;
+        Ok(format!(
+            "{{\"info\":{},\"files\":{files}}}",
+            json_str(&pkg.manifest.info)
+        ))
+    }
+
+    /// Inserts the card from saved block records; with none, a new empty FAT32 card.
+    pub fn sd_restore(&mut self, records: &[u8]) {
+        let mut store = BlockStore::default();
+        for r in records.as_chunks::<RECORD>().0 {
+            store.write(u32::from_le_bytes([r[0], r[1], r[2], r[3]]), &r[4..]);
+        }
+        store.take_dirty(); // these are already saved
+        if records.len() < RECORD {
+            fat32::format(&mut store, CARD_BLOCKS, CARD_SERIAL);
+        }
+        self.m.bus.periphs.insert_sd(SdCard::new(CARD_BLOCKS, store));
+    }
+
+    /// Replaces the card with a new empty one. The host forgets its saved blocks first.
+    pub fn sd_erase(&mut self) {
+        self.sd_restore(&[]);
+    }
+
+    /// Blocks written since the previous call, as records of LBA + 512 bytes.
+    pub fn sd_take_dirty(&mut self) -> Vec<u8> {
+        let Some(card) = &mut self.m.bus.periphs.sd else {
+            return Vec::new();
+        };
+        let dirty = card.store.take_dirty();
+        let mut out = vec![0u8; dirty.len() * RECORD];
+        for (lba, r) in dirty.into_iter().zip(out.as_chunks_mut::<RECORD>().0) {
+            r[..4].copy_from_slice(&lba.to_le_bytes());
+            card.store.read(lba, &mut r[4..]);
+        }
+        out
+    }
+
+    /// Bytes in use on the card (non-zero blocks).
+    pub fn sd_used_bytes(&self) -> f64 {
+        self.m
+            .bus
+            .periphs
+            .sd
+            .as_ref()
+            .map_or(0.0, |c| (c.store.used_blocks() * BLOCK_SIZE) as f64)
+    }
+
+    pub fn sd_capacity_bytes(&self) -> f64 {
+        self.m
+            .bus
+            .periphs
+            .sd
+            .as_ref()
+            .map_or(0.0, |c| c.capacity_blocks() as f64 * BLOCK_SIZE as f64)
     }
 
     /// Virtual-device setting Sleep Method = Legacy (ADR-0012); applies at the next power-on.
@@ -95,10 +203,9 @@ impl Emulator {
     /// Power-on reset: a fresh device with the loaded firmware (RAM and backup domain cleared).
     pub fn power_on(&mut self) -> Result<(), String> {
         let image = self.image.as_ref().ok_or("no firmware loaded")?;
-        let legacy = self.m.bus.legacy_sleep;
-        let mut m = Machine::new();
-        m.bus.legacy_sleep = legacy;
-        m.load_dfu(image, self.cpu2_start).map_err(|e| e.to_string())?;
+        let image = image.clone();
+        let mut m = self.fresh_machine();
+        m.load_dfu(&image, self.cpu2_start).map_err(|e| e.to_string())?;
         m.power_on();
         self.m = m;
         self.log_read = 0;
@@ -257,5 +364,35 @@ mod tests {
     #[test]
     fn power_on_without_firmware_is_an_error() {
         assert!(Emulator::new().power_on().is_err());
+    }
+
+    #[test]
+    fn card_records_round_trip_and_a_new_card_is_formatted() {
+        let mut e = Emulator::new();
+        e.sd_restore(&[]);
+        assert!(e.sd_used_bytes() > 0.0, "formatted");
+        let new = e.sd_take_dirty();
+        assert_eq!(new.len() % RECORD, 0);
+        assert!(!new.is_empty(), "a new card must be saved");
+        assert!(e.sd_take_dirty().is_empty());
+
+        let mut again = Emulator::new();
+        again.sd_restore(&new);
+        assert_eq!(again.sd_used_bytes(), e.sd_used_bytes());
+        assert!(again.sd_take_dirty().is_empty(), "restored blocks are not dirty");
+    }
+
+    #[test]
+    fn settings_and_card_survive_a_new_machine() {
+        let mut e = Emulator::new();
+        e.sd_restore(&[]);
+        e.set_legacy_sleep(false);
+        let used = e.sd_used_bytes();
+        let m = e.fresh_machine();
+        assert!(!m.bus.legacy_sleep);
+        assert_eq!(
+            m.bus.periphs.sd.as_ref().unwrap().store.used_blocks() * BLOCK_SIZE,
+            used as usize
+        );
     }
 }
