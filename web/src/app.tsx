@@ -19,7 +19,7 @@ import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
 import { Fidelity } from "./pages";
 import { SiteFooter, SiteHeader } from "./ui/chrome";
-import { drawView, faceMatrix, fitView, toRgba, type View } from "./ui/shell";
+import { ART_STEP, artSize, drawView, fitView, toRgba, type View } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
 const locale = detectLocale(navigator.languages ?? [navigator.language]);
@@ -87,7 +87,7 @@ interface Stop {
   digest: string;
 }
 
-/** The pixel-art device (ADR-0015), with the real canvas and buttons on its face, in perspective. */
+/** The pixel-art device (ADR-0015), with the real canvas and buttons on its face. */
 function DeviceView({
   view,
   canvas,
@@ -106,14 +106,15 @@ function DeviceView({
   box: preact.RefObject<HTMLDivElement | null>;
 }) {
   const m = view.model;
+  const size = artSize(m);
   const art = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = art.current?.getContext("2d");
     if (!c) return;
-    const img = c.createImageData(view.width, view.height);
-    toRgba(drawView(view), img.data);
+    const img = c.createImageData(size.width, size.height);
+    toRgba(drawView(m), img.data);
     c.putImageData(img, 0, 0);
-  }, [view]);
+  }, [m.width]);
   const at = (x: number, y: number, w: number, h: number) => ({
     left: `${x}px`,
     top: `${y}px`,
@@ -140,12 +141,16 @@ function DeviceView({
   const { cx, cy } = m.disc;
   const half = Math.floor(cell / 2);
   return (
-    <div class="device" ref={box} style={{ width: `${view.width * view.cell}px`, height: `${view.height * view.cell}px` }}>
-      <canvas class="art" ref={art} width={view.width} height={view.height} aria-hidden="true" />
-      <div
-        class="face"
-        style={{ width: `${m.width}px`, height: `${m.height}px`, transform: faceMatrix(view.matrix, view.cell) }}
-      >
+    <div
+      class="device"
+      ref={box}
+      style={{
+        width: `${size.width * ART_STEP * view.scale}px`,
+        height: `${size.height * ART_STEP * view.scale}px`,
+      }}
+    >
+      <canvas class="art" ref={art} width={size.width} height={size.height} aria-hidden="true" />
+      <div class="face" style={{ width: `${m.width}px`, height: `${m.height}px`, transform: `scale(${view.scale})` }}>
         <canvas class="lcd" ref={canvas} width={LCD_W} height={LCD_H} aria-label="LCD 128×64" style={at(m.lcd.x, m.lcd.y, LCD_W, LCD_H)} />
         <span
           class="led"
@@ -528,15 +533,6 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [dragging, setDragging] = useState(false);
   const [tab, setTab] = useState<Tab>("device");
   const [view, setView] = useState<View>(() => fitView(800));
-  const [front, setFront] = useState(() => {
-    try {
-      return localStorage.getItem("dryflash.front") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const frontRef = useRef(front);
-  const updateView = useRef<() => void>(() => {});
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
   const send: Send = (m, transfer = []) => worker.current?.postMessage(m, transfer);
@@ -823,12 +819,9 @@ export function App({ embed = false }: { embed?: boolean }) {
     const update = () => {
       const full = document.fullscreenElement === deviceBox.current;
       setView(
-        full
-          ? fitView(window.innerWidth, window.innerHeight, frontRef.current, 12)
-          : fitView(el.clientWidth - 16, Infinity, frontRef.current),
+        full ? fitView(window.innerWidth, window.innerHeight, 12) : fitView(el.clientWidth - 16),
       );
     };
-    updateView.current = update;
     const ro = new ResizeObserver(update);
     ro.observe(el);
     document.addEventListener("fullscreenchange", update);
@@ -1041,24 +1034,6 @@ export function App({ embed = false }: { embed?: boolean }) {
               <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
                 {tr("fullscreen")}
               </button>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={front}
-                  onChange={(e) => {
-                    const on = (e.currentTarget as HTMLInputElement).checked;
-                    setFront(on);
-                    frontRef.current = on;
-                    try {
-                      localStorage.setItem("dryflash.front", on ? "1" : "0");
-                    } catch {
-                      // A remembered preference only: the view still changes.
-                    }
-                    updateView.current();
-                  }}
-                />{" "}
-                {tr("frontView")}
-              </label>
               <label>
                 <input
                   type="checkbox"

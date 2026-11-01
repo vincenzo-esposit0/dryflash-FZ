@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The device as pixel art (ADR-0015), rasterized by code: a model of the body's face, in "face units"
-// where one unit is one LCD pixel, seen through a projective map and extruded for its thickness. Every
-// art pixel is aligned to the screen, whatever the angle: staircase edges rather than rotated squares.
-// The real LCD canvas and buttons sit on the same face through the same map (`faceMatrix`).
+// The device as pixel art (ADR-0015), rasterized by code and seen from the front: a model of the body's
+// face, in "face units" where one unit is one LCD pixel, drawn in chunkier art pixels with its thickness
+// showing below. The real LCD canvas and buttons sit on the same face.
 
 /** The word on the body. The maintainer's choice (ADR-0015): change it here and nowhere else. */
 export const BODY_NAME = "FL1PP3R";
@@ -165,139 +164,57 @@ export function faceColour(m: Model, u: number, v: number): number {
   return BODY;
 }
 
-// ---- Projection ----
+// ---- Fitting and drawing ----
 
-export type Matrix = [number, number, number, number, number, number, number, number, number];
-export type Point = [number, number];
+/** Art pixels are chunkier than the LCD's: this many face units each. */
+export const ART_STEP = 2;
+/** Rows of body side below the face, in face units. */
+export const SIDE_UNITS = 12;
 
-/** The projective map taking the rectangle (0,0)–(w,h) to a quad, corners in order TL, TR, BR, BL. */
-export function quadMatrix(w: number, h: number, q: [Point, Point, Point, Point]): Matrix {
-  const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = q;
-  // Unit square to quad (Heckbert).
-  const [dx1, dx2, sx] = [x1 - x2, x3 - x2, x0 - x1 + x2 - x3];
-  const [dy1, dy2, sy] = [y1 - y2, y3 - y2, y0 - y1 + y2 - y3];
-  const det = dx1 * dy2 - dx2 * dy1;
-  const g = (sx * dy2 - dx2 * sy) / det;
-  const k = (dx1 * sy - sx * dy1) / det;
-  return [
-    (x1 - x0 + g * x1) / w,
-    (x3 - x0 + k * x3) / h,
-    x0,
-    (y1 - y0 + g * y1) / w,
-    (y3 - y0 + k * y3) / h,
-    y0,
-    g / w,
-    k / h,
-    1,
-  ];
-}
-
-export function apply(m: Matrix, u: number, v: number): Point {
-  const d = m[6] * u + m[7] * v + m[8];
-  return [(m[0] * u + m[1] * v + m[2]) / d, (m[3] * u + m[4] * v + m[5]) / d];
-}
-
-export function invert(m: Matrix): Matrix {
-  const [a, b, c, d, e, f, g, h, i] = m;
-  return [e * i - f * h, c * h - b * i, b * f - c * e, f * g - d * i, a * i - c * g, c * d - a * f, d * h - e * g, b * g - a * h, a * e - b * d];
-}
-
-/** CSS `matrix3d` placing the face (1 unit = 1 CSS px) on the drawing, at `cell` CSS px per art pixel. */
-export function faceMatrix(m: Matrix, cell: number): string {
-  const n = (x: number) => +x.toFixed(9);
-  return `matrix3d(${n(m[0] * cell)},${n(m[3] * cell)},0,${n(m[6])},${n(m[1] * cell)},${n(m[4] * cell)},0,${n(m[7])},0,0,1,0,${n(m[2] * cell)},${n(m[5] * cell)},0,${n(m[8])})`;
-}
-
-/** A way of showing the device: the model, its map to art pixels, and the size of an art pixel. */
+/** The device at a whole-number scale (CSS px per face unit). */
 export interface View {
   model: Model;
-  matrix: Matrix;
-  /** Art pixels. */
-  width: number;
-  height: number;
-  /** CSS px per art pixel. */
-  cell: number;
-  /** Where the thickness goes, in art pixels. */
-  depth: Point;
-  tilted: boolean;
+  scale: number;
 }
 
-const TILT_WIDTH = 200;
-const TILT_HEIGHT = 132;
+const totalHeight = (m: Model) => m.height + SIDE_UNITS + ART_STEP;
 
-function tiltedView(cell: number): View {
-  const model = landscape();
-  return {
-    model,
-    matrix: quadMatrix(model.width, model.height, [
-      [16, 8],
-      [192, 36],
-      [186, 106],
-      [6, 74],
-    ]),
-    width: TILT_WIDTH,
-    height: TILT_HEIGHT,
-    cell,
-    depth: [3, 18],
-    tilted: true,
-  };
-}
-
-function frontView(model: Model, cell: number): View {
-  const depth: Point = [0, 8];
-  return {
-    model,
-    matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-    width: model.width,
-    height: model.height + depth[1] + 1,
-    cell,
-    depth,
-    tilted: false,
-  };
-}
-
-/**
- * Chooses a view for the available space. The angled view needs chunky pixels and room for a readable
- * screen; otherwise the device faces the viewer, stacked on phones. Scales are whole numbers.
- */
-export function fitView(available: number, height = Infinity, front = false, maxCell = 6): View {
-  const cell = Math.min(maxCell, Math.floor(available / TILT_WIDTH), Math.floor(height / TILT_HEIGHT));
-  if (!front && cell >= 3) return tiltedView(cell);
+/** Screen beside the controls where that fits at 2× or more, stacked on phones. */
+export function fitView(available: number, height = Infinity, maxScale = 4): View {
+  const scaleFor = (m: Model) => Math.min(maxScale, Math.floor(available / m.width), Math.floor(height / totalHeight(m)));
   const wide = landscape();
-  const s = Math.min(4, Math.floor(available / wide.width), Math.floor(height / (wide.height + 9)));
-  if (s >= 2) return frontView(wide, s);
+  if (scaleFor(wide) >= 2) return { model: wide, scale: scaleFor(wide) };
   const tall = portrait();
-  return frontView(tall, Math.max(1, Math.min(4, Math.floor(available / tall.width), Math.floor(height / (tall.height + 9)))));
+  return { model: tall, scale: Math.max(1, scaleFor(tall)) };
 }
 
-/** Draws the view: width × height palette indices (COLOURS), row by row. */
-export function drawView(view: View): Uint8Array {
-  const { model: m, width: w, height: h, depth } = view;
-  const inv = invert(view.matrix);
+/** Size of the drawing in art pixels. */
+export function artSize(m: Model): { width: number; height: number } {
+  return { width: Math.ceil(m.width / ART_STEP), height: Math.ceil(totalHeight(m) / ART_STEP) };
+}
+
+/** Draws the device: width × height palette indices (COLOURS), row by row. */
+export function drawView(m: Model): Uint8Array {
+  const { width: w, height: h } = artSize(m);
   const px = new Uint8Array(w * h);
-  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(depth[0]), Math.abs(depth[1]))));
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      // The face first, then the side layers behind it; the first hit is what shows.
-      const [fu, fv] = apply(inv, x + 0.5, y + 0.5);
-      if (inBody(m, fu, fv)) {
-        px[y * w + x] = faceColour(m, fu, fv);
+      const [u, v] = [(x + 0.5) * ART_STEP, (y + 0.5) * ART_STEP];
+      if (inBody(m, u, v)) {
+        px[y * w + x] = faceColour(m, u, v);
         continue;
       }
-      for (let t = 1; t <= steps; t++) {
-        const k = t / steps;
-        const [u, v] = apply(inv, x + 0.5 - depth[0] * k, y + 0.5 - depth[1] * k);
-        if (!inBody(m, u, v)) continue;
-        let c = k < 0.35 ? SIDE : SIDE_DARK;
-        // Ports along the long side, as a row of slots.
-        const slot = v > m.height - 14 && k > 0.45 && k < 0.75;
+      // The thickness: the outline of the face, repeated downwards.
+      for (let t = ART_STEP; t <= SIDE_UNITS; t += ART_STEP) {
+        if (!inBody(m, u, v - t)) continue;
+        let c = t <= SIDE_UNITS * 0.4 ? SIDE : SIDE_DARK;
+        const slot = t > SIDE_UNITS * 0.4 && t <= SIDE_UNITS * 0.8;
         if (slot && ((u > m.width * 0.5 && u < m.width * 0.68) || (u > m.width * 0.72 && u < m.width * 0.76))) c = SLOT;
         px[y * w + x] = c;
         break;
       }
     }
   }
-  // The outline: every painted pixel next to an empty one, and the line where the face meets the side.
   const out = px.slice();
   const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : px[y * w + x]);
   for (let y = 0; y < h; y++) {
