@@ -9,6 +9,7 @@ pub const EXTI1: u32 = 7;
 pub const EXTI2: u32 = 8;
 pub const EXTI3: u32 = 9;
 pub const EXTI4: u32 = 10;
+pub const DMA1_CH1: u32 = 11;
 pub const EXTI9_5: u32 = 23;
 pub const I2C1_EV: u32 = 30;
 pub const I2C3_EV: u32 = 32;
@@ -18,6 +19,9 @@ pub const USART1: u32 = 36;
 pub const LPUART1: u32 = 37;
 pub const EXTI15_10: u32 = 40;
 pub const RTC_ALARM: u32 = 41;
+pub const DMA2_CH1: u32 = 55;
+#[allow(dead_code)]
+pub const DMA2_CH6: u32 = 60;
 pub const IPCC_C1_RX: u32 = 44;
 pub const IPCC_C1_TX: u32 = 45;
 pub const HSEM: u32 = 46;

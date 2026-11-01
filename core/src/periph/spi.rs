@@ -91,6 +91,11 @@ impl Spi {
     }
 
     /// Register write; DR writes exchange frames through `transfer` (MOSI → MISO).
+    /// Takes one received byte for a DMA channel.
+    pub fn take_rx(&mut self) -> Option<u8> {
+        self.rx.pop_front()
+    }
+
     pub fn write(&mut self, off: u32, v: u32, size: Size, transfer: &mut dyn FnMut(u8) -> u8) -> bool {
         if off != DR {
             return self.regs.write(off, v);

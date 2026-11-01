@@ -3,7 +3,7 @@
 //! where time was spent, and the bring-up digest (BRIEF §8).
 //!
 //! usage: cargo run --release -p dryflash-core --example boot -- <firmware.dfu>
-//!            [--elf firmware.elf] [--cycles N] [--cpu2-start 0x080D7000] [--png screen.png]
+//!            [--elf firmware.elf] [--cycles N] [--cpu2-start 0x080D7000] [--png screen.png] [--sd-gib N]
 
 use dryflash_core::cpu::Stop;
 use dryflash_core::loader::{dfu, elf::Symbols};
@@ -64,6 +64,15 @@ fn main() {
 
     let mut m = Machine::new();
     m.load_dfu(&image, cpu2_start).expect("load DFU");
+    if let Some(gib) = opt("--sd-gib") {
+        // A new card: empty FAT32, as the web app prepares it.
+        let blocks = gib.parse::<u32>().expect("--sd-gib") * 2_097_152;
+        let mut store = dryflash_core::board::sdcard::BlockStore::default();
+        dryflash_core::board::fat32::format(&mut store, blocks, 0x4446_0001);
+        m.bus
+            .periphs
+            .insert_sd(dryflash_core::board::sdcard::SdCard::new(blocks, store));
+    }
     let mut watch: Vec<(u32, &str)> = Vec::new();
     if let Some(s) = &symbols {
         for name in MILESTONES {
@@ -165,6 +174,13 @@ fn main() {
         lights.white,
         m.display_generation()
     );
+    if let Some(card) = &m.bus.periphs.sd {
+        println!(
+            "SD: {} blocks in use, unsupported commands {:?}",
+            card.store.used_blocks(),
+            card.unsupported
+        );
+    }
     if let Some(p) = opt("--png") {
         let png = dryflash_core::trace::png::lcd(&m.display_frame(), 4, lights.white > 0);
         std::fs::write(&p, png).expect("write PNG");

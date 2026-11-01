@@ -90,7 +90,7 @@ impl SystemBus {
             .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
     }
 
-    fn ram_write(&mut self, addr: u32, bytes: &[u8]) -> bool {
+    pub(super) fn ram_write(&mut self, addr: u32, bytes: &[u8]) -> bool {
         match self.ram_slice(addr, bytes.len() as u32) {
             Some(s) => {
                 s.copy_from_slice(bytes);

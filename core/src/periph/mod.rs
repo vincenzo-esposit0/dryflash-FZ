@@ -6,6 +6,7 @@
 //! all others, accesses are latched and reported in the digest as "register file only".
 //! Offsets with no register at all keep read-as-zero / write-ignored semantics (ADR-0009).
 
+pub mod dma;
 pub mod exti;
 pub mod gpio;
 pub mod hsem;
@@ -78,6 +79,7 @@ enum Slot {
     Rtc,
     Hsem,
     Ipcc,
+    Dma(usize),
     Rng,
     Lptim(usize),
     Generic(usize),
@@ -92,6 +94,8 @@ pub struct Periphs {
     pub i2c: Vec<i2c::I2c>,
     /// SPI1 (radio, NFC, external), SPI2 (display, SD card).
     pub spi: Vec<spi::Spi>,
+    /// DMA1, DMA2.
+    pub dma: Vec<dma::Dma>,
     /// USART1 (Furi log / CLI), LPUART1.
     pub usart: Vec<usart::Usart>,
     pub rtc: rtc::Rtc,
@@ -119,6 +123,8 @@ pub struct Periphs {
     last_levels: [u16; 6],
     /// Index of SYSCFG in `generic` (EXTICRx select the GPIO port of each EXTI line).
     syscfg: Option<usize>,
+    /// microSD card, if inserted.
+    pub sd: Option<crate::board::sdcard::SdCard>,
     /// Buttons currently held by the user.
     pub buttons_down: Vec<crate::board::Button>,
 }
@@ -134,7 +140,7 @@ impl Periphs {
         let mut descs: Vec<&'static PeriphDesc> = svd::ALL.iter().filter(|d| !CORE_BLOCKS.contains(&d.name)).collect();
         descs.sort_by_key(|d| d.base);
         let (mut gpio, mut i2c, mut generic) = (Vec::new(), Vec::new(), Vec::new());
-        let (mut spi, mut usart) = ([None, None], [None, None]);
+        let (mut spi, mut usart, mut dma) = ([None, None], [None, None], [None, None]);
         let mut lptim = Vec::new();
         let mut map = Vec::new();
         for (i, d) in descs.iter().enumerate() {
@@ -168,6 +174,11 @@ impl Periphs {
                 "RTC" => Slot::Rtc,
                 "HSEM" => Slot::Hsem,
                 "IPCC" => Slot::Ipcc,
+                "DMA1" | "DMA2" => {
+                    let i = (d.name == "DMA2") as usize;
+                    dma[i] = Some(dma::Dma::new(d));
+                    Slot::Dma(i)
+                }
                 "RNG" => Slot::Rng,
                 "LPTIM1" | "LPTIM2" => {
                     lptim.push(lptim::Lptim::new(d));
@@ -193,6 +204,7 @@ impl Periphs {
             exti: exti::Exti::new(),
             i2c,
             spi: spi.into_iter().map(|s| s.expect("SPI1 and SPI2 in the SVD")).collect(),
+            dma: dma.into_iter().map(|d| d.expect("DMA1 and DMA2 in the SVD")).collect(),
             usart: usart
                 .into_iter()
                 .map(|u| u.expect("USART1 and LPUART1 in the SVD"))
@@ -213,8 +225,53 @@ impl Periphs {
             syscfg,
             display: crate::board::st7567::St7567::new(),
             last_levels: [0; 6],
+            sd: None,
             buttons_down: Vec::new(),
         }
+    }
+
+    /// SPI register write, with the board wiring behind the data register. SPI2 carries the
+    /// display and the SD card, selected by their chip selects; SPI1 devices (radio, NFC) are not
+    /// attached yet, so MISO reads 0xFF (pulled up).
+    pub fn spi_write(&mut self, i: usize, off: u32, value: u32, size: Size) -> bool {
+        let Periphs {
+            spi, gpio, display, sd, ..
+        } = self;
+        let mut route = |mosi: u8| -> u8 {
+            if i != 1 {
+                return 0xFF;
+            }
+            let low = |(port, pin): (usize, u8)| gpio[port].driven_low(pin);
+            if low(crate::board::DISPLAY_CS) {
+                let (port, pin) = crate::board::DISPLAY_A0;
+                display.write(mosi, gpio[port].levels() & (1 << pin) != 0);
+            }
+            match sd {
+                Some(card) if low(crate::board::SD_CS) => card.transfer(mosi),
+                _ => 0xFF,
+            }
+        };
+        spi[i].write(off, value, size, &mut route)
+    }
+
+    /// Inserts a card: the card-detect switch pulls SD_CD low.
+    pub fn insert_sd(&mut self, card: crate::board::sdcard::SdCard) {
+        self.sd = Some(card);
+        self.drive_sd_detect();
+        self.gpio_changed();
+    }
+
+    /// Removes the card and returns it.
+    pub fn remove_sd(&mut self) -> Option<crate::board::sdcard::SdCard> {
+        let card = self.sd.take();
+        self.drive_sd_detect();
+        self.gpio_changed();
+        card
+    }
+
+    fn drive_sd_detect(&mut self) {
+        let (port, pin) = crate::board::SD_CD;
+        self.gpio[port].drive(pin, self.sd.is_some().then_some(false));
     }
 
     fn levels(&self) -> [u16; 6] {
@@ -254,6 +311,12 @@ impl Periphs {
                     self.exti.edge(line, now[port] & (1 << line) != 0);
                 }
             }
+        }
+        let (cp, cpin) = crate::board::SD_CS;
+        if now[cp] & !self.last_levels[cp] & (1 << cpin) != 0
+            && let Some(card) = &mut self.sd
+        {
+            card.deselect();
         }
         let (rp, rpin) = crate::board::DISPLAY_RST;
         if self.last_levels[rp] & (1 << rpin) != 0 && now[rp] & (1 << rpin) == 0 {
@@ -314,6 +377,7 @@ impl Periphs {
         self.usart.iter_mut().for_each(|u| u.reset());
         self.hsem.reset();
         self.ipcc.reset();
+        self.dma.iter_mut().for_each(|d| d.reset());
         self.rng.reset();
         self.lptim.iter_mut().for_each(|l| l.reset());
         if kind == ResetKind::PowerOn {
@@ -325,6 +389,7 @@ impl Periphs {
         for b in self.buttons_down.clone() {
             self.drive_button(b, true);
         }
+        self.drive_sd_detect();
         self.last_levels = self.levels();
         self.exti.reset();
         self.i2c.iter_mut().for_each(|i| i.reset());
@@ -378,6 +443,8 @@ impl Periphs {
         if self.usart[1].irq() {
             lines |= 1 << irq::LPUART1;
         }
+        lines |= (self.dma[0].irq_channels() as u64) << irq::DMA1_CH1;
+        lines |= (self.dma[1].irq_channels() as u64) << irq::DMA2_CH1;
         if self.hsem.irq() {
             lines |= 1 << irq::HSEM;
         }
@@ -417,6 +484,7 @@ impl Periphs {
             Slot::Rtc => &self.rtc.regs,
             Slot::Hsem => &self.hsem.regs,
             Slot::Ipcc => &self.ipcc.regs,
+            Slot::Dma(i) => &self.dma[i].regs,
             Slot::Rng => &self.rng.regs,
             Slot::Lptim(i) => &self.lptim[i].regs,
             Slot::Generic(i) => &self.generic[i],
@@ -459,6 +527,7 @@ impl Periphs {
             }
             Slot::Hsem => self.hsem.read(word_off),
             Slot::Ipcc => self.ipcc.regs.read(word_off),
+            Slot::Dma(i) => self.dma[i].regs.read(word_off),
             Slot::Rng => self.rng.read(word_off),
             Slot::Lptim(i) => {
                 let ns = self.now_ns(ctx.now);
@@ -496,17 +565,7 @@ impl Periphs {
         let off = addr - base;
         let word_off = off & !3;
         if let Slot::Spi(i) = slot {
-            // SPI2 carries the display (and the SD card from M4); devices answer when their
-            // chip select is low. SPI1 devices (radio, NFC) are not attached: MISO reads 0xFF.
-            let Periphs { spi, gpio, display, .. } = self;
-            let mut route = |mosi: u8| -> u8 {
-                let level = |(port, pin): (usize, u8)| gpio[port].levels() & (1 << pin) != 0;
-                if i == 1 && !level(crate::board::DISPLAY_CS) {
-                    display.write(mosi, level(crate::board::DISPLAY_A0));
-                }
-                0xFF
-            };
-            if !spi[i].write(off, value, size, &mut route) {
+            if !self.spi_write(i, off, value, size) {
                 ctx.digest.unimplemented(addr, true, Some(value), ctx.pc);
             }
             return true;
@@ -553,6 +612,11 @@ impl Periphs {
             }
             Slot::Hsem => {
                 let h = self.hsem.write(word_off, value);
+                self.update_irqs();
+                h
+            }
+            Slot::Dma(i) => {
+                let h = self.dma[i].write(word_off, value);
                 self.update_irqs();
                 h
             }
@@ -654,6 +718,16 @@ impl Periphs {
                 "LEDs and backlight (LP5562)",
                 Partial,
                 "registers, LED map, program engines (PWM, ramp, wait, branch); timings approximate",
+            ),
+            (
+                "microSD card (SPI mode)",
+                Emulated,
+                "SDHC commands 0/8/9/10/12/13/16/17/18/24/25/55/41/58, FAT32 prepared; instant, CRC not checked",
+            ),
+            (
+                "DMA1/DMA2 + DMAMUX",
+                Partial,
+                "SPI requests only, transfers instantaneous; other requests stay idle",
             ),
             ("Buttons", Emulated, "six keys with the board's polarity and pulls"),
             (

@@ -417,8 +417,8 @@ modelled when a firmware starts it.
 - The built-in browser cannot drop files, so the firmware itself was run on the live site by the
   maintainer: official 1.5.1 `firmware.dfu` dropped on the page, popup, Desktop and menu navigation
   with the keyboard work. Definition of done met.
-- Not exercised yet: pull request previews (PR #1 predates the Worker; the path runs for the first
-  time on the next pull request).
+- Pull request previews work: PR #2 published https://pr-2-app.dryflash.workers.dev, checked in the
+  browser (wasm core under the CSP, no console errors).
 
 Known limits at the end of M3: no SD card or `.tgz` (M4), no Bluetooth and no factory keys
 (ADR-0012), wasm CPU benchmark at 137 MIPS vs 158 in M0.
@@ -428,3 +428,20 @@ Known limits at the end of M3: no SD card or `.tgz` (M4), no Bluetooth and no fa
 Open https://app.dryflash.workers.dev and drop a `firmware.dfu` on the page (official update
 package, after `node scripts/fetch-firmware.mjs official`:
 `firmware/cache/official/f7-update-1.5.1/firmware.dfu`). Esc closes the popup, Enter opens the menu.
+
+## M4 — SD card + `.tgz`
+
+### Checkpoint 1 — SD card over SPI and DMA
+
+- **The SD driver moves blocks through DMA** (`furi_hal_spi_bus_trx_dma`, DMA2 channels 6/7, requests
+  8/9 through DMAMUX channels 12/13, IRQ 60/61; values from the pinned `stm32wbxx_ll_dmamux.h` and
+  `stm32wb55xx.h`), so DMA stopped being a register file: DMA1/DMA2 have flags, IFCR and TC
+  interrupts, and SPI requests run instantly. Other requests stay idle with the channel enabled.
+- `board/sdcard.rs`: SDHC in SPI mode (CMD0/8/9/10/12/13/16/17/18/24/25/55/ACMD41/58), CS PC12, card
+  detect PC10 pulled low by an inserted card. Sparse store, 1 GiB by default (ADR-0013).
+- `board/fat32.rs`: MBR + empty FAT32 volume.
+- **Chip selects now mean "output driven low".** The handles leave CS in analog mode when idle; on
+  the board that floats high, but `levels()` read 0, which would have sent SD traffic to the display.
+- Firmware log with a card: "card detected", "card mounted", state files created under `/int`
+  ("State saved"), animation `L0_NoDb_128x51` (no resources on the card yet). After a power cycle
+  with the same card the Dolphin state is found again. Commands outside the model: none seen.

@@ -66,6 +66,12 @@ impl Gpio {
         v
     }
 
+    /// The pin is an output driven low. A chip select left in analog mode floats high on the
+    /// board (pull-ups), while `levels` would read it as 0.
+    pub fn driven_low(&self, pin: u8) -> bool {
+        self.output_mask() & (1 << pin) != 0 && self.regs.get(ODR) & (1 << pin) == 0
+    }
+
     /// A board device drives (or releases, with `None`) pin `pin`.
     pub fn drive(&mut self, pin: u8, level: Option<bool>) {
         let m = 1u16 << pin;
