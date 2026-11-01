@@ -4,8 +4,10 @@
 //!
 //! usage: cargo run --release -p dryflash-core --example boot -- <firmware.dfu>
 //!            [--elf firmware.elf] [--cycles N] [--cpu2-start 0x080D7000] [--png screen.png] [--sd-gib N]
+//!   or: ... --example boot -- <update.tgz>  (quick install: firmware + resources on a 1 GiB card)
 
 use dryflash_core::cpu::Stop;
+use dryflash_core::loader::package::{Package, install_resources};
 use dryflash_core::loader::{dfu, elf::Symbols};
 use dryflash_core::machine::{Machine, RunExit};
 use std::collections::BTreeMap;
@@ -54,7 +56,12 @@ fn main() {
     let symbols = opt("--elf").map(|p| Symbols::from_elf(&std::fs::read(p).unwrap()).expect("parse ELF"));
     let sym = |pc: u32| symbols.as_ref().and_then(|s| s.lookup(pc));
 
-    let image = dfu::parse(&std::fs::read(path).expect("read DFU")).expect("parse DFU");
+    let file = std::fs::read(path).expect("read firmware");
+    let package = path
+        .ends_with(".tgz")
+        .then(|| Package::parse(&file).expect("parse package"));
+    let image = dfu::parse(package.as_ref().map_or(&file[..], |p| p.firmware())).expect("parse DFU");
+    let cpu2_start = package.as_ref().map_or(cpu2_start, |p| p.manifest.radio_address);
     for t in &image.targets {
         println!("target {:?} alt {}", t.name.as_deref().unwrap_or("-"), t.alt_setting);
         for e in &t.elements {
@@ -64,6 +71,16 @@ fn main() {
 
     let mut m = Machine::new();
     m.load_dfu(&image, cpu2_start).expect("load DFU");
+    if let Some(p) = &package {
+        const BLOCKS: u32 = 2_097_152;
+        let mut store = dryflash_core::board::sdcard::BlockStore::default();
+        dryflash_core::board::fat32::format(&mut store, BLOCKS, 0x4446_0001);
+        let files = install_resources(&p.resources().expect("resources"), &mut store).expect("install");
+        println!("package {:?}: {files} resource files on the card", p.manifest.info);
+        m.bus
+            .periphs
+            .insert_sd(dryflash_core::board::sdcard::SdCard::new(BLOCKS, store));
+    }
     if let Some(gib) = opt("--sd-gib") {
         // A new card: empty FAT32, as the web app prepares it.
         let blocks = gib.parse::<u32>().expect("--sd-gib") * 2_097_152;

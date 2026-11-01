@@ -3,3 +3,4 @@
 
 pub mod dfu;
 pub mod elf;
+pub mod package;

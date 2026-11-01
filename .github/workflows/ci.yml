@@ -37,6 +37,11 @@ jobs:
       - run: cargo clippy --workspace --all-targets --release -- -D warnings
       - name: Tests (including those that need the pinned firmware)
         run: cargo test --workspace --release -- --include-ignored
+      - name: Check a prepared card with an independent tool (dosfstools)
+        run: |
+          sudo apt-get install -y dosfstools
+          cargo run --release -p dryflash-core --example mkcard -- firmware/cache/official/flipper-z-f7-update-1.5.1.tgz "$RUNNER_TEMP/part.img"
+          fsck.vfat -n "$RUNNER_TEMP/part.img"
       - name: Build wasm
         run: cargo build --release --target wasm32-unknown-unknown -p dryflash-core-wasm -p dryflash-cpu-bench --lib
       - name: Benchmark under Node (V8)
