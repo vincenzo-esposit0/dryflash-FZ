@@ -643,7 +643,7 @@ once not tested; wasm CPU benchmark still below its M0 figure.
   import, new device and dialogs, links, proxy refusals, framing headers, `/compat`, `/about`, `/embed` in a frame, phone
   width, axe on `/`, `/compat`, `/about` (WCAG A and AA) in English and Italian, tabs and drawn keys by keyboard.
 - **Every test fails on an uncaught error, a console error or a CSP violation.** One exception, by the violation's own
-  details: WebKit reports `style-src-attr` for the internals of a `<select>`, with no effect on rendering. The CSP was not
+  details: WebKit reports `style-src-attr` for the internals of a `<select>`, with no effect on rendering, and not always naming the element. Chromium and Firefox stay strict on it. The CSP was not
   relaxed.
 - Result here: **44 of 44 on Chromium and WebKit.** Playwright's Firefox does not start on macOS 27 ("Could not find profile
   folder", from the binary alone), so Firefox runs in the CI job `e2e`, on which `deploy` now depends.
@@ -661,7 +661,7 @@ once not tested; wasm CPU benchmark still below its M0 figure.
 ### On production
 
 Merged through PR #5. The merge's first run on main failed on the WebKit `style-src-attr` flake, so `deploy` was
-skipped; the re-run passed and deployed `c31a952`. The flake's fix is PR #6.
+skipped; the re-run passed and deployed `c31a952`. The flake's fix is PR #8.
 
 Checked against https://app.dryflash.workers.dev, 2026-11-01:
 

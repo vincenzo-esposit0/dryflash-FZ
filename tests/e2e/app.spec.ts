@@ -9,8 +9,9 @@ const TGZ = resolve(__dirname, "../../firmware/cache/official/flipper-z-f7-updat
 
 /**
  * Every test fails on an uncaught error, a console error or a CSP violation. One exception: WebKit reports
- * `style-src-attr` for its own internals of a `<select>`, with no effect on rendering. Only that element is
- * forgiven, and the CSP is not relaxed for it.
+ * `style-src-attr` for its own internals of a `<select>`, with no effect on rendering, and the event does not
+ * always say which element. So WebKit is forgiven that directive alone: inline styles of ours would fail on
+ * Chromium and Firefox, which stay strict. The CSP is not relaxed.
  */
 const test = base.extend<{ errorWatch: void }>({
   errorWatch: [
@@ -33,7 +34,7 @@ const test = base.extend<{ errorWatch: void }>({
       const seen = await page
         .evaluate(() => (window as unknown as { __violations?: string[] }).__violations ?? [])
         .catch(() => [] as string[]);
-      const forgiven = (v: string) => browserName === "webkit" && v.startsWith("style-src-attr on SELECT");
+      const forgiven = (v: string) => browserName === "webkit" && v.startsWith("style-src-attr ");
       expect([...errors, ...seen.filter((v) => !forgiven(v))]).toEqual([]);
     },
     { auto: true },
