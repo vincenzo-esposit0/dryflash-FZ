@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ButtonName, CrashRecord, FidelityRow, FromWorker, Status, ToWorker } from "./emu/protocol";
 import type { Persistence } from "./emu/cardstore";
+import type { DeviceMeta } from "./emu/devices";
 import { detectLocale, t, type Key } from "./i18n";
 import { stripAnsi } from "./ui/ansi";
 import { buttonForKey } from "./ui/keys";
@@ -17,6 +18,101 @@ interface Stop {
   digest: string;
 }
 
+function DeviceSettings({ device, send }: { device: DeviceMeta; send: (m: ToWorker) => void }) {
+  const board = device.board;
+  const battery = device.battery;
+  const options = (prefix: "region" | "color", values: number[]) =>
+    values.map((v) => <option value={v}>{tr(`${prefix}${v}` as Key)}</option>);
+  return (
+    <details>
+      <summary>{tr("settings")}</summary>
+      <div class="settings">
+        <label>
+          {tr("deviceName")}{" "}
+          <input
+            type="text"
+            maxLength={8}
+            pattern="[A-Za-z0-9]{1,8}"
+            value={board.name}
+            onChange={(e) => {
+              const input = e.currentTarget as HTMLInputElement;
+              if (input.checkValidity() && input.value) {
+                send({ type: "settings", board: { ...board, name: input.value } });
+              } else input.value = board.name;
+            }}
+          />
+        </label>
+        <label>
+          {tr("region")}{" "}
+          <select
+            value={board.region}
+            onChange={(e) =>
+              send({ type: "settings", board: { ...board, region: +(e.currentTarget as HTMLSelectElement).value } })
+            }
+          >
+            {options("region", [1, 2, 3, 4])}
+          </select>
+        </label>
+        <label>
+          {tr("color")}{" "}
+          <select
+            value={board.color}
+            onChange={(e) =>
+              send({ type: "settings", board: { ...board, color: +(e.currentTarget as HTMLSelectElement).value } })
+            }
+          >
+            {options("color", [1, 2, 3])}
+          </select>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={device.legacySleep}
+            onChange={(e) =>
+              send({ type: "settings", legacySleep: (e.currentTarget as HTMLInputElement).checked })
+            }
+          />{" "}
+          {tr("legacySleep")}
+        </label>
+        <p class="hint">{tr("legacySleepNote")}</p>
+        <label>
+          {tr("batteryCharge")} {battery.percent}%{" "}
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={battery.percent}
+            onChange={(e) =>
+              send({ type: "settings", battery: { ...battery, percent: +(e.currentTarget as HTMLInputElement).value } })
+            }
+          />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={battery.charging}
+            onChange={(e) =>
+              send({ type: "settings", battery: { ...battery, charging: (e.currentTarget as HTMLInputElement).checked } })
+            }
+          />{" "}
+          {tr("charging")}
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={battery.usb}
+            onChange={(e) =>
+              send({ type: "settings", battery: { ...battery, usb: (e.currentTarget as HTMLInputElement).checked } })
+            }
+          />{" "}
+          {tr("usb")}
+        </label>
+        <p class="hint">{tr("applyNext")}</p>
+      </div>
+    </details>
+  );
+}
+
 export function App() {
   const worker = useRef<Worker | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -25,6 +121,8 @@ export function App() {
   const [ready, setReady] = useState(false);
   const [fidelity, setFidelity] = useState<FidelityRow[]>([]);
   const [firmware, setFirmware] = useState<string | null>(null);
+  const [devices, setDevices] = useState<DeviceMeta[]>([]);
+  const [active, setActive] = useState<DeviceMeta | null>(null);
   const [persistence, setPersistence] = useState<Persistence>("none");
   const [cardCapacity, setCardCapacity] = useState(0);
   const [cardUsed, setCardUsed] = useState(0);
@@ -37,7 +135,6 @@ export function App() {
   const [stop, setStop] = useState<Stop | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [turbo, setTurbo] = useState(false);
-  const [legacySleep, setLegacySleep] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [pressed, setPressed] = useState<Set<ButtonName>>(new Set());
 
@@ -60,11 +157,26 @@ export function App() {
       switch (m.type) {
         case "ready":
           setFidelity(m.fidelity);
+          setReady(true);
+          break;
+        case "devices":
+          setDevices(m.devices);
+          setActive(m.active);
           setPersistence(m.persistence);
           setCardCapacity(m.cardCapacityBytes);
           setCardUsed(m.cardUsedBytes);
-          setReady(true);
+          setFirmware(m.hasFirmware ? (m.active.firmware ?? "?") : null);
+          setStatus(null);
           break;
+        case "exported": {
+          const url = URL.createObjectURL(new Blob([m.bytes], { type: "application/gzip" }));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${m.name.replace(/[^\w.-]+/g, "_")}.dryflash`;
+          a.click();
+          URL.revokeObjectURL(url);
+          break;
+        }
         case "loaded":
           setFirmware(m.name);
           setInstalled(
@@ -354,20 +466,83 @@ export function App() {
       </section>
 
       <section>
-        <h2>{tr("device")}</h2>
-        <label>
-          <input
-            type="checkbox"
-            checked={legacySleep}
-            onChange={(e) => {
-              const on = (e.currentTarget as HTMLInputElement).checked;
-              setLegacySleep(on);
-              send({ type: "settings", legacySleep: on });
+        <h2>{tr("devices")}</h2>
+        <div class="controls">
+          <label>
+            {tr("device")}{" "}
+            <select
+              value={active?.id}
+              disabled={!ready}
+              onChange={(e) => send({ type: "selectDevice", id: (e.currentTarget as HTMLSelectElement).value })}
+            >
+              {devices.map((d) => (
+                <option value={d.id}>{d.label}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={!active}
+            onClick={() => {
+              const label = prompt(tr("newDeviceName"));
+              if (label) send({ type: "createDevice", label });
             }}
-          />{" "}
-          {tr("legacySleep")}
-        </label>
-        <p class="hint">{tr("legacySleepNote")}</p>
+          >
+            {tr("newDevice")}
+          </button>
+          <button
+            type="button"
+            disabled={!active}
+            onClick={() => {
+              const label = prompt(tr("renamePrompt"), active?.label);
+              if (label) send({ type: "renameDevice", label });
+            }}
+          >
+            {tr("renameDevice")}
+          </button>
+          <button type="button" disabled={!active} onClick={() => send({ type: "exportDevice" })}>
+            {tr("exportDevice")}
+          </button>
+          <label class="file-button">
+            {tr("importDevice")}
+            <input
+              type="file"
+              accept=".dryflash"
+              disabled={!active}
+              onChange={async (e) => {
+                const input = e.currentTarget as HTMLInputElement;
+                const f = input.files?.[0];
+                input.value = "";
+                if (f) {
+                  const bytes = await f.arrayBuffer();
+                  send({ type: "importDevice", bytes }, [bytes]);
+                }
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={!active}
+            onClick={() => {
+              if (confirm(tr("factoryConfirm"))) send({ type: "factoryReset" });
+            }}
+          >
+            {tr("factoryReset")}
+          </button>
+          <button
+            type="button"
+            disabled={!active}
+            onClick={() => {
+              if (confirm(tr("deleteConfirm"))) send({ type: "deleteDevice" });
+            }}
+          >
+            {tr("deleteDevice")}
+          </button>
+        </div>
+        <p class="hint">
+          {firmware ? tr("firmwareOn").replace("{name}", firmware) : tr("noFirmwareOn")}
+        </p>
+        {active && <DeviceSettings device={active} send={send} />}
       </section>
 
       <section>

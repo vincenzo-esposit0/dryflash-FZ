@@ -52,6 +52,8 @@ pub struct SystemBus {
     access_pc: u32,
     /// SYSCFG_MEMRMP selects SRAM1 at address 0 (how the updater runs from RAM).
     sram_at_zero: bool,
+    /// Counts flash writes, so the host knows when to save the image.
+    pub flash_writes: u64,
     /// Flash range written since the last `take_flash_dirty` (decoded instructions go stale).
     flash_dirty: Option<(u32, u32)>,
     /// OBL_LAUNCH asked for a reload of the option bytes: a system reset.
@@ -108,6 +110,7 @@ impl SystemBus {
             cpu2: cpu2::Cpu2::default(),
             legacy_sleep: true,
             sram_at_zero: false,
+            flash_writes: 0,
             flash_dirty: None,
             reset_requested: false,
         };
@@ -163,6 +166,7 @@ impl SystemBus {
     }
 
     fn mark_flash(&mut self, addr: u32, len: u32) {
+        self.flash_writes += 1;
         let (lo, hi) = self.flash_dirty.unwrap_or((addr, addr + len));
         self.flash_dirty = Some((lo.min(addr), hi.max(addr + len)));
     }

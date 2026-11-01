@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Emulator host: owns the wasm core, runs it in slices and posts frames, LEDs, log and status.
 import init, { Emulator, Exit, version } from "../wasm/dryflash.js";
-import { openCardStore, type CardStore } from "./cardstore";
+import { MemoryOnlyStore, type CardStore } from "./cardstore";
+import {
+  decodeExport,
+  encodeExport,
+  gunzip,
+  gzip,
+  newDevice,
+  openDevices,
+  type DeviceBackend,
+  type DeviceMeta,
+} from "./devices";
 import { BUTTONS, PROTOCOL_VERSION, type FromWorker, type ToWorker } from "./protocol";
 import { Pacer, PressTimer, SLICE_BUDGET_MS, STEP_MS } from "./scheduler";
 
@@ -13,6 +23,10 @@ const FLUSH_MS = 1000;
 
 let emu: Emulator | null = null;
 let card: CardStore | null = null;
+let devices: DeviceBackend | null = null;
+let device: DeviceMeta | null = null;
+/** Flash contents last saved, by the core's write counter. */
+let savedFlash = 0;
 let lastFlush = 0;
 /** Saves run one after another, in order, whatever the store's speed. */
 let saving: Promise<void> = Promise.resolve();
@@ -127,7 +141,83 @@ function flushCard(): Promise<void> {
       .then(() => store.put(records))
       .catch((err) => post({ type: "error", message: `saving the card: ${err}` }));
   }
+  if (card.kind !== "none" && emu.flash_generation() !== savedFlash) saveFlash();
   return saving;
+}
+
+/** Saves what is in flash and the option bytes: an update changes them while running. */
+function saveFlash() {
+  const [e, store, id] = [emu!, devices!, device!.id];
+  savedFlash = e.flash_generation();
+  const [flash, ob] = [e.flash_image(), e.option_bytes()];
+  saving = saving
+    .then(() => store.write(id, "flash", flash))
+    .then(() => store.write(id, "ob", ob))
+    .catch((err) => post({ type: "error", message: `saving the firmware: ${err}` }));
+}
+
+/** Runs device operations in order with the saves, reporting failures. */
+function queue(what: string, op: () => Promise<void>) {
+  saving = saving.then(op).catch((err) => post({ type: "error", message: `${what}: ${err}` }));
+}
+
+function applySettings(e: Emulator, d: DeviceMeta) {
+  e.set_legacy_sleep(d.legacySleep);
+  e.set_board(d.board.name, d.board.region, d.board.color);
+  e.set_uid64(parseInt(d.uid.slice(0, 8), 16), parseInt(d.uid.slice(8), 16));
+  e.set_battery(d.battery.percent, d.battery.charging, d.battery.usb);
+}
+
+async function reportDevices() {
+  post({
+    type: "devices",
+    devices: await devices!.list(),
+    active: device!,
+    persistence: card!.kind,
+    hasFirmware: loaded,
+    cardCapacityBytes: emu!.sd_capacity_bytes(),
+    cardUsedBytes: emu!.sd_used_bytes(),
+  });
+}
+
+/** Stops the current device and brings up `d`: its card, its flash and, if it has one, its firmware. */
+async function activate(d: DeviceMeta) {
+  running = false;
+  clearTimeout(timer);
+  const e = emu;
+  emu = null;
+  e?.free();
+  device = d;
+  // Another tab may hold this device's card: then it runs from memory, and the page says so.
+  card = await devices!.openCard(d.id).catch(() => new MemoryOnlyStore());
+  const next = new Emulator();
+  applySettings(next, d);
+  next.sd_restore(await card.load());
+  const flash = card.kind === "none" ? null : await devices!.read(d.id, "flash");
+  const ob = await devices!.read(d.id, "ob");
+  if (flash?.length) next.flash_restore(flash, ob ?? new Uint8Array(0));
+  emu = next;
+  loaded = !!flash?.length;
+  savedFlash = next.flash_generation();
+  await devices!.save(d);
+  await devices!.setActive(d.id);
+  void flushCard(); // a new card has just been prepared
+  await reportDevices();
+  if (loaded) powerOn();
+  else {
+    const bits = new Uint8Array(1024).buffer;
+    post({ type: "frame", bits }, [bits]);
+    post({ type: "lights", rgbw: [0, 0, 0, 0] });
+  }
+  // After the current operation, so that what it queued behind it keeps its order.
+  queueMicrotask(drainWaiting);
+}
+
+/** Saves the active device's description, and tells the UI. */
+async function saveDevice(changes: Partial<DeviceMeta>) {
+  device = { ...device!, ...changes };
+  await devices!.save(device);
+  await reportDevices();
 }
 
 function powerOn() {
@@ -143,8 +233,19 @@ function powerOn() {
   schedule(0);
 }
 
+// Messages that arrive while a device is being brought up wait for it.
+const waiting: ToWorker[] = [];
+
 ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
-  const m = ev.data;
+  if (emu) handle(ev.data);
+  else waiting.push(ev.data);
+};
+
+function drainWaiting() {
+  while (emu && waiting.length) handle(waiting.shift()!);
+}
+
+function handle(m: ToWorker) {
   if (!emu) return;
   try {
     switch (m.type) {
@@ -157,6 +258,7 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         if (m.ota && isPackage) {
           const { info } = JSON.parse(emu.start_ota(bytes));
           post({ type: "otaStarted", name: m.name, info });
+          queue("saving the device", () => saveDevice({ firmware: m.name }));
           running = true;
           restartPacing();
           void flushCard();
@@ -170,6 +272,8 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
         post({ type: "loaded", name: m.name, packageInfo });
         powerOn();
         void flushCard();
+        saveFlash();
+        queue("saving the device", () => saveDevice({ firmware: m.name }));
         break;
       }
       case "flush":
@@ -218,28 +322,95 @@ ctx.onmessage = (ev: MessageEvent<ToWorker>) => {
           publish(true);
         }
         break;
-      case "settings":
-        emu.set_legacy_sleep(m.legacySleep);
+      case "settings": {
+        const d = device!;
+        const next: DeviceMeta = {
+          ...d,
+          legacySleep: m.legacySleep ?? d.legacySleep,
+          board: m.board ?? d.board,
+          battery: m.battery ?? d.battery,
+        };
+        applySettings(emu, next);
+        queue("saving the settings", () => saveDevice(next));
+        break;
+      }
+      case "selectDevice":
+        void flushCard();
+        queue("switching device", async () => {
+          const d = (await devices!.list()).find((x) => x.id === m.id);
+          if (d) await activate(d);
+        });
+        break;
+      case "createDevice":
+        void flushCard();
+        queue("creating the device", () => activate(newDevice(m.label, crypto.randomUUID().slice(0, 8))));
+        break;
+      case "renameDevice":
+        queue("renaming the device", () => saveDevice({ label: m.label }));
+        break;
+      case "deleteDevice":
+        queue("deleting the device", async () => {
+          const gone = device!.id;
+          running = false;
+          card = null;
+          await devices!.remove(gone);
+          const rest = (await devices!.list()).filter((d) => d.id !== gone);
+          await activate(rest[0] ?? newDevice("Device 1", crypto.randomUUID().slice(0, 8)));
+        });
+        break;
+      case "factoryReset":
+        queue("resetting the device", async () => {
+          running = false;
+          const d = device!;
+          await card!.clear();
+          emu!.sd_take_dirty(); // blocks of the old card must not reach the cleared store
+          await devices!.write(d.id, "flash", new Uint8Array(0));
+          await activate({ ...newDevice(d.label, d.id, d.uid) });
+        });
+        break;
+      case "exportDevice":
+        void flushCard();
+        queue("exporting the device", async () => {
+          const whole = encodeExport({
+            meta: device!,
+            flash: emu!.flash_image(),
+            ob: emu!.option_bytes(),
+            card: await card!.load(),
+          });
+          const bytes = (await gzip(whole)).buffer as ArrayBuffer;
+          post({ type: "exported", name: device!.label, bytes }, [bytes]);
+        });
+        break;
+      case "importDevice":
+        void flushCard();
+        queue("importing the device", async () => {
+          const x = decodeExport(await gunzip(new Uint8Array(m.bytes)));
+          // A new device: importing a file twice must not overwrite the first copy.
+          const d: DeviceMeta = { ...x.meta, id: crypto.randomUUID().slice(0, 8), label: `${x.meta.label} (import)` };
+          await devices!.save(d);
+          if (x.flash.length) await devices!.write(d.id, "flash", x.flash);
+          await devices!.write(d.id, "ob", x.ob);
+          const store = await devices!.openCard(d.id);
+          await store.load();
+          await store.put(x.card);
+          await activate(d);
+        });
         break;
     }
   } catch (err) {
     running = false;
     post({ type: "error", message: String(err) });
   }
-};
+}
 
 await init();
-const starting = new Emulator();
-card = await openCardStore();
-starting.sd_restore(await card.load());
-emu = starting;
-void flushCard(); // a new card has just been prepared
+devices = await openDevices();
+const known = await devices.list();
+const activeId = await devices.getActive();
+await activate(known.find((d) => d.id === activeId) ?? known[0] ?? newDevice("Device 1", "default"));
 post({
   type: "ready",
   version: version(),
   protocol: PROTOCOL_VERSION,
-  fidelity: JSON.parse(emu.fidelity_json()),
-  persistence: card.kind,
-  cardCapacityBytes: emu.sd_capacity_bytes(),
-  cardUsedBytes: emu.sd_used_bytes(),
+  fidelity: JSON.parse((emu as unknown as Emulator).fidelity_json()),
 });

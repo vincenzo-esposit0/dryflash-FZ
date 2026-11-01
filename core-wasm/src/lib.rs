@@ -3,9 +3,12 @@
 //! Node runner drive. Values cross the boundary as numbers, byte arrays and JSON strings
 //! (no serde dependency); 64-bit counters are returned as `f64` (exact below 2^53).
 
-use dryflash_core::board::Button;
+use dryflash_core::board::bq25896::Bq25896;
+use dryflash_core::board::bq27220::Bq27220;
 use dryflash_core::board::fat32;
+use dryflash_core::board::otp::BoardInfo;
 use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
+use dryflash_core::board::{Battery, Button};
 use dryflash_core::bus::Fidelity;
 use dryflash_core::loader::dfu;
 use dryflash_core::loader::package::{Package, install_resources, stage_ota};
@@ -43,6 +46,10 @@ pub struct Emulator {
     m: Machine,
     /// A firmware is in flash.
     loaded: bool,
+    /// Virtual-device settings, applied to each new machine.
+    board: BoardInfo,
+    uid64: u64,
+    battery: Battery,
     /// USART1 bytes already handed to the host.
     log_read: usize,
     /// Description of the last non-budget exit.
@@ -58,6 +65,9 @@ impl Emulator {
         // What the updater or the firmware programmed survives, like on real flash.
         m.bus.flash.copy_from_slice(&self.m.bus.flash);
         m.bus.periphs.flash.ob = self.m.bus.periphs.flash.ob;
+        m.bus.provision_otp(&self.board);
+        m.bus.set_uid64(self.uid64);
+        apply_battery(&mut m, &self.battery);
         if let Some(old) = self.m.bus.periphs.remove_sd() {
             let mut card = SdCard::new(old.capacity_blocks(), BlockStore::default());
             card.store = old.store;
@@ -65,6 +75,17 @@ impl Emulator {
             m.bus.periphs.insert_sd(card);
         }
         m
+    }
+}
+
+/// The same battery state for the fuel gauge and the charger.
+fn apply_battery(m: &mut Machine, b: &Battery) {
+    let i2c = &mut m.bus.periphs.i2c[0];
+    if let Some(g) = i2c.device_mut::<Bq27220>() {
+        g.battery = *b;
+    }
+    if let Some(c) = i2c.device_mut::<Bq25896>() {
+        c.battery = *b;
     }
 }
 
@@ -96,6 +117,9 @@ impl Emulator {
         Emulator {
             m: Machine::new(),
             loaded: false,
+            board: BoardInfo::default(),
+            uid64: 0,
+            battery: Battery::default(),
             log_read: 0,
             last_stop: String::new(),
         }
@@ -209,6 +233,68 @@ impl Emulator {
             .sd
             .as_ref()
             .map_or(0.0, |c| c.capacity_blocks() as f64 * BLOCK_SIZE as f64)
+    }
+
+    /// OTP board data (BoardInfo): name up to 8 ASCII characters, region 1–4, color 1–3.
+    /// Applies at the next power-on.
+    pub fn set_board(&mut self, name: &str, region: u8, color: u8) -> Result<(), String> {
+        if name.is_empty() || name.len() > dryflash_core::board::otp::NAME_LENGTH || !name.is_ascii() {
+            return Err(format!("device name must be 1 to 8 ASCII characters: {name:?}"));
+        }
+        self.board.name = name.to_string();
+        self.board.region = region;
+        self.board.color = color;
+        Ok(())
+    }
+
+    /// The 64-bit unique ID of this device (the firmware derives its BLE address and name from it).
+    pub fn set_uid64(&mut self, high: u32, low: u32) {
+        self.uid64 = (high as u64) << 32 | low as u64;
+    }
+
+    /// Simulated battery, effective at once: charge in percent, charging, USB plugged in.
+    pub fn set_battery(&mut self, percent: u8, charging: bool, usb: bool) {
+        let percent = percent.min(100);
+        self.battery.state_of_charge = percent;
+        // A plausible Li-ion curve for display; nothing in the firmware depends on its shape.
+        self.battery.voltage_mv = 3300 + percent as u16 * 9;
+        self.battery.current_ma = if charging { 500 } else { -50 };
+        self.battery.charging = charging;
+        self.battery.usb_connected = usb;
+        apply_battery(&mut self.m, &self.battery);
+    }
+
+    /// The flash contents up to the last programmed byte.
+    pub fn flash_image(&self) -> Vec<u8> {
+        let f = &self.m.bus.flash;
+        let end = f.iter().rposition(|&b| b != 0xFF).map_or(0, |i| i + 1);
+        f[..end].to_vec()
+    }
+
+    /// Option bytes as stored (128 bytes).
+    pub fn option_bytes(&self) -> Vec<u8> {
+        self.m.bus.periphs.flash.ob.to_vec()
+    }
+
+    /// Restores saved flash and option bytes: a device with a firmware already installed.
+    pub fn flash_restore(&mut self, image: &[u8], option_bytes: &[u8]) -> Result<(), String> {
+        let f = &mut self.m.bus.flash;
+        if image.len() > f.len() {
+            return Err("flash image larger than the flash".to_string());
+        }
+        f.fill(0xFF);
+        f[..image.len()].copy_from_slice(image);
+        let ob = &mut self.m.bus.periphs.flash.ob;
+        if option_bytes.len() == ob.len() {
+            ob.copy_from_slice(option_bytes);
+        }
+        self.loaded = !image.is_empty();
+        Ok(())
+    }
+
+    /// Changes whenever the firmware or an installer writes to flash.
+    pub fn flash_generation(&self) -> f64 {
+        self.m.bus.flash_writes as f64
     }
 
     /// Virtual-device setting Sleep Method = Legacy (ADR-0012); applies at the next power-on.
@@ -400,6 +486,36 @@ mod tests {
         again.sd_restore(&new);
         assert_eq!(again.sd_used_bytes(), e.sd_used_bytes());
         assert!(again.sd_take_dirty().is_empty(), "restored blocks are not dirty");
+    }
+
+    #[test]
+    fn flash_image_is_trimmed_and_restores() {
+        let mut e = Emulator::new();
+        assert!(e.flash_image().is_empty());
+        e.m.bus.flash[3] = 7;
+        assert_eq!(e.flash_image(), [0xFF, 0xFF, 0xFF, 7]);
+        let (image, ob) = (e.flash_image(), e.option_bytes());
+        let mut other = Emulator::new();
+        other.flash_restore(&image, &ob).unwrap();
+        assert_eq!(other.m.bus.flash[3], 7);
+        assert_eq!(other.m.bus.flash[4], 0xFF);
+        assert!(other.power_on().is_ok(), "a restored device can start");
+    }
+
+    #[test]
+    fn device_settings_reach_a_new_machine() {
+        let mut e = Emulator::new();
+        e.set_board("Bob", 1, 2).unwrap();
+        assert!(e.set_board("far too long", 1, 2).is_err());
+        e.set_uid64(0x0011_2233, 0x4455_6677);
+        e.set_battery(42, true, true);
+        let mut m = e.fresh_machine();
+        assert_eq!(&m.bus.otp[24..27], b"Bob");
+        assert_eq!(m.bus.otp[17], 1);
+        let uid = m.bus.engi[(dryflash_core::bus::map::UID64_ADDR - dryflash_core::bus::map::ENGI_BASE) as usize];
+        assert_eq!(uid, 0x77);
+        let g = m.bus.periphs.i2c[0].device_mut::<Bq27220>().unwrap();
+        assert_eq!((g.battery.state_of_charge, g.battery.charging), (42, true));
     }
 
     #[test]
