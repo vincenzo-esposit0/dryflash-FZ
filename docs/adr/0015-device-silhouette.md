@@ -17,11 +17,11 @@ and can make a site look official.
 
 ## Decision
 
-- The device is pixel art in the style of the maintainer's reference picture: angled, a thick body, bevels,
-  screen on the left, a round D-pad on the right, an orange LCD, on a sky-blue stage. It is rasterized by code
-  from a model (`web/src/ui/shell.ts`), with art pixels aligned to the screen; the real LCD canvas and buttons
-  sit on the same face through the same projective map. A front view is one tick away, and phones get it
-  stacked.
+- The device is pixel art in the style of the maintainer's reference picture, **seen from the front on the
+  page's dark background**: a thick body, bevels, screen on the left, a round D-pad on the right, an orange LCD.
+  It is rasterized by code from a model (`web/src/ui/shell.ts`) in chunky art pixels, with the real LCD canvas and
+  buttons on the same face. Phones get it stacked. An angled view and a coloured stage were tried and dropped at
+  the maintainer's request.
 - **The body says "FL1PP3R"**, by the maintainer's explicit choice (`BODY_NAME`, one constant). The maintainer
   was told that this does not avoid the trademark and may read as a deliberate imitation of the name.
 - **The product stays dryflash** in its name, title, logo text, URLs and documentation. No mascot, and no artwork

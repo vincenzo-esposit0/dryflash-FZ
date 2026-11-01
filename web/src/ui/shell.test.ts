@@ -1,20 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import {
+  ART_STEP,
   BODY_NAME,
   COLOURS,
   LCD_HEIGHT,
   LCD_WIDTH,
-  apply,
+  artSize,
   drawView,
   faceColour,
-  faceMatrix,
   fitView,
   inBody,
-  invert,
   landscape,
   portrait,
-  quadMatrix,
   toRgba,
   type Circle,
   type Model,
@@ -71,88 +69,41 @@ describe.each([
   });
 });
 
-describe("projection", () => {
-  const q: [[number, number], [number, number], [number, number], [number, number]] = [
-    [16, 8],
-    [192, 36],
-    [186, 106],
-    [6, 74],
-  ];
-  const h = quadMatrix(270, 124, q);
-
-  it("takes the corners to the quad", () => {
-    [
-      [0, 0],
-      [270, 0],
-      [270, 124],
-      [0, 124],
-    ].forEach(([u, v], i) => {
-      const [x, y] = apply(h, u, v);
-      expect(x).toBeCloseTo(q[i][0], 6);
-      expect(y).toBeCloseTo(q[i][1], 6);
-    });
-  });
-
-  it("inverts", () => {
-    const [x, y] = apply(h, 100, 50);
-    const [u, v] = apply(invert(h), x, y);
-    expect(u).toBeCloseTo(100, 6);
-    expect(v).toBeCloseTo(50, 6);
-  });
-
-  it("writes a CSS matrix that agrees with the map", () => {
-    const n = faceMatrix(h, 3).slice(9, -1).split(",").map(Number);
-    const [u, v] = [100, 50];
-    const w = n[3] * u + n[7] * v + n[15];
-    const [x, y] = apply(h, u, v);
-    expect((n[0] * u + n[4] * v + n[12]) / w).toBeCloseTo(x * 3, 3);
-    expect((n[1] * u + n[5] * v + n[13]) / w).toBeCloseTo(y * 3, 3);
-  });
-});
-
 describe("fitView", () => {
   it("never overflows and uses whole scales", () => {
     for (const w of [320, 343, 375, 480, 600, 700, 900, 1148, 2000]) {
       const v = fitView(w);
-      expect(Number.isInteger(v.cell)).toBe(true);
-      expect(v.width * v.cell).toBeLessThanOrEqual(w);
+      expect(Number.isInteger(v.scale)).toBe(true);
+      expect(v.model.width * v.scale).toBeLessThanOrEqual(w);
     }
   });
 
-  it("is angled where there is room, like the reference", () => {
+  it("puts the screen beside the controls where there is room", () => {
     const v = fitView(1148);
-    expect(v.tilted).toBe(true);
-    expect(v.cell).toBeGreaterThanOrEqual(3);
-  });
-
-  it("faces the viewer on a phone, stacked, with a readable screen", () => {
-    const v = fitView(343);
-    expect(v.tilted).toBe(false);
-    expect(v.model.width).toBe(portrait().width);
-    expect(v.cell).toBe(2);
-  });
-
-  it("can be asked to face the viewer", () => {
-    const v = fitView(1148, Infinity, true);
-    expect(v.tilted).toBe(false);
     expect(v.model.width).toBe(landscape().width);
-    expect(v.cell).toBe(4);
+    expect(v.scale).toBe(4);
+  });
+
+  it("stacks on a phone, with a readable screen", () => {
+    const v = fitView(343);
+    expect(v.model.width).toBe(portrait().width);
+    expect(v.scale).toBe(2);
   });
 
   it("respects a height limit", () => {
-    const v = fitView(4000, 500, false, 12);
-    expect(v.height * v.cell).toBeLessThanOrEqual(500);
+    const v = fitView(4000, 500, 12);
+    expect(artSize(v.model).height * ART_STEP * v.scale).toBeLessThanOrEqual(500);
   });
 });
 
-describe("drawView", () => {
-  it.each([
-    ["angled", fitView(1148)],
-    ["front", fitView(1148, Infinity, true)],
-    ["stacked", fitView(343)],
-  ])("%s: known colours, outlined, with a side", (_n, v) => {
-    const px = drawView(v);
-    expect(px.length).toBe(v.width * v.height);
+describe.each([
+  ["landscape", landscape()],
+  ["portrait", portrait()],
+])("drawing the %s model", (_n, m) => {
+  it("uses known colours, outlined, with a side", () => {
+    const px = drawView(m);
+    const { width, height } = artSize(m);
+    expect(px.length).toBe(width * height);
     expect(Math.max(...px)).toBeLessThan(COLOURS.length);
     expect(px[0]).toBe(0);
     expect(px.includes(1)).toBe(true);
@@ -162,13 +113,9 @@ describe("drawView", () => {
     expect(rgba[3]).toBe(0);
   });
 
-  it("paints the word somewhere on the angled body", () => {
-    const v = fitView(1148);
-    const m = v.model;
-    let orangeBelowScreen = 0;
-    for (let u = m.name.x; u < m.name.x + 100; u++) {
-      if (faceColour(m, u, m.name.y + 1) === 8) orangeBelowScreen++;
-    }
-    expect(orangeBelowScreen).toBeGreaterThan(5);
+  it("paints the word on the body", () => {
+    let orange = 0;
+    for (let u = m.name.x; u < m.name.x + 100; u++) if (faceColour(m, u, m.name.y + 1) === 8) orange++;
+    expect(orange).toBeGreaterThan(5);
   });
 });
