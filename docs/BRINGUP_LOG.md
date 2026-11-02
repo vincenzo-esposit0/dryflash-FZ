@@ -773,3 +773,8 @@ Demo:
 The merge's run on main failed in `cpu-fuzz`, seed 25, so `deploy` was skipped: `strh r4, [r0, r2]` with an address of 0xE002C629. Each register was random and outside the
 PPB, which the generator avoids, but their sum was inside it. dryflash models the PPB and this Unicorn harness maps nothing there, so there was nothing to compare, and the CPU was
 not at fault. The fuzzer now counts that as a known case, from the address Unicorn reports. Re-running would not have helped: the seed is the run number, and a re-run keeps it.
+
+### Device skins
+
+The body now follows the device's Color setting at once: white, black or transparent (ADR-0015, addendum), and it stays after a reload. New devices start white. The firmware still reads the colour from OTP at the next power-on,
+as before. The board seen through the transparent body is decoration. E2E: the setting changes the drawing and survives a reload, on Chromium and WebKit. Checked by eye at desktop and phone widths.

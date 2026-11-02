@@ -34,3 +34,9 @@ and can make a site look official.
 
 - Should Flipper Devices object, the word and the shape must change: both are in `shell.ts` alone.
 - The disclaimer is on every page except the bare embed frame, where the host page is responsible.
+
+## Skins (addendum, 2026-11-02)
+
+The maintainer asked for the body to follow the device's colour setting. Black, white and transparent are palettes over the same drawing, and the transparent one also
+shows a board through the body. That board is decoration, not a model of the real PCB. The setting takes effect on the drawing at once; the firmware still reads it from OTP at the next power-on.
+New devices start white, the look so far, where they used to be black in a setting nothing showed. Saved devices keep their setting, so one left at the old default turns black.
