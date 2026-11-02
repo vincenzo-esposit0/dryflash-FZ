@@ -1,6 +1,6 @@
 {
   "tagline": "Try any Flipper Zero firmware in your browser before flashing it to your real device.",
-  "status": "Pre-alpha (milestone M5). The real firmware runs instruction by instruction; see the hardware fidelity table for what is emulated, simulated or missing.",
+  "status": "Pre-alpha (milestone M6). The real firmware runs instruction by instruction; see the hardware fidelity table for what is emulated, simulated or missing.",
   "positioning": "dryflash is a smoke test, not a hardware certification. It catches boot failures, crashes, faults, hangs and broken UI flows. It does not reproduce real RF, NFC/RFID physics, BLE, power behaviour or exact timing. Passing in the emulator does not guarantee the firmware works on hardware.",
   "disclaimer": "Not affiliated with or endorsed by Flipper Devices Inc. Flipper Zero is a trademark of its respective owner. For educational and authorised security research only.",
   "source": "Source code (GPL-3.0-or-later)",
