@@ -807,3 +807,11 @@ whole path has only been reasoned through, since the browser's behaviour cannot 
 
 The Firmware Hub (https://vincenzo-esposit0.github.io/flipper-zero-firmware-hub/) links "Prova nell'emulatore" to the emulator's home page, which opens, and that closes M5's last item. It does not pass a firmware with `?fw=`, so the visitor still has to
 provide one.
+
+### Checkpoint 3 closed — the action from another repository
+
+Release `v0.1.0` and the tag `v1` are out. In a separate private repository, `vincenzo-esposit0/dryflash-action-test`, a pull request used `vincenzo-esposit0/dryflash-FZ/action@v1` with the runner from the release and the
+official firmware fetched from its host and hash-checked. One job passed and commented on the pull request; another, with a check that cannot hold, made the action fail with exit code 1 and result `fail`, as it should. That
+meets the first half of M6's definition of done. BRIEF §10 now has the screen as text in the comment, the maintainer's decision.
+
+- **Not tested:** a pull request from a fork; a real firmware crash through the action.

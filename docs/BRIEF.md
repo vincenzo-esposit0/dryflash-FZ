@@ -215,7 +215,7 @@ Detect and report, with timestamps in virtual time:
 - Input script format (YAML): steps like `wait_for_desktop`, `press: [down, ok]`, `long_press: back`, `wait: 2s`, `expect_screen: golden.png` (pixel-exact or tolerance), `expect_no_crash`.
 - Built-in **default smoke test**: boot → reach Desktop → open main menu → open each top-level app category → back out → no crash/hang.
 - Exit codes: 0 pass, 1 firmware failure, 2 emulator limitation hit, 3 usage error.
-- Publish a **GitHub Action** in `/action` (usable as `uses: vincenzo-esposit0/dryflash-FZ/action@v1`) that runs the smoke test on a firmware build artifact and comments the result + screenshots on PRs.
+- Publish a **GitHub Action** in `/action` (usable as `uses: vincenzo-esposit0/dryflash-FZ/action@v1`) that runs the smoke test on a firmware build artifact and comments the result on PRs, with the last screen as text and the screenshots in the run's artifact: GitHub's API cannot attach images to a comment (maintainer's decision, M6).
 - Our own CI: build core + web, run unit/E2E tests, run the compatibility matrix nightly against the pinned + latest releases, publish `/compat`.
 
 ---
