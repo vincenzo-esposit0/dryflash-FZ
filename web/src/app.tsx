@@ -20,7 +20,7 @@ import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
 import { Fidelity } from "./pages";
 import { SiteFooter, SiteHeader } from "./ui/chrome";
-import { ART_STEP, artSize, drawView, fitView, toRgba, type View } from "./ui/shell";
+import { ART_STEP, artSize, drawView, fitView, type Skin, skinForColour, toRgba, type View } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
 const locale = detectLocale(navigator.languages ?? [navigator.language]);
@@ -170,6 +170,7 @@ function CrashPanel({ stop }: { stop: Stop }) {
 /** The pixel-art device (ADR-0015), with the real canvas and buttons on its face. */
 function DeviceView({
   view,
+  skin,
   canvas,
   leds,
   pressed,
@@ -178,6 +179,7 @@ function DeviceView({
   box,
 }: {
   view: View;
+  skin: Skin;
   canvas: preact.RefObject<HTMLCanvasElement | null>;
   leds: [number, number, number, number];
   pressed: Set<ButtonName>;
@@ -192,9 +194,10 @@ function DeviceView({
     const c = art.current?.getContext("2d");
     if (!c) return;
     const img = c.createImageData(size.width, size.height);
-    toRgba(drawView(m), img.data);
+    toRgba(drawView(m, skin), img.data, skin);
+    c.clearRect(0, 0, size.width, size.height);
     c.putImageData(img, 0, 0);
-  }, [m.width]);
+  }, [m.width, skin]);
   const at = (x: number, y: number, w: number, h: number) => ({
     left: `${x}px`,
     top: `${y}px`,
@@ -1078,6 +1081,7 @@ export function App({ embed = false }: { embed?: boolean }) {
         <section class="stage" ref={stage} aria-label={tr("device")}>
           <DeviceView
             view={view}
+            skin={skinForColour(active?.board.color ?? 2)}
             canvas={canvas}
             leds={leds}
             pressed={pressed}

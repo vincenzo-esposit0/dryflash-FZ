@@ -65,7 +65,7 @@ export function newDevice(label: string, id: string, uid = newUid()): DeviceMeta
     id,
     label,
     legacySleep: true,
-    board: { name: "dryflash", region: 4, color: 1 },
+    board: { name: "dryflash", region: 4, color: 2 },
     battery: { percent: 80, charging: false, usb: false },
     uid,
     firmware: null,

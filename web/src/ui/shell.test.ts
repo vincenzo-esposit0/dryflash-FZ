@@ -9,6 +9,7 @@ import {
   artSize,
   drawView,
   faceColour,
+  skinForColour,
   fitView,
   inBody,
   landscape,
@@ -69,6 +70,12 @@ describe.each([
   });
 });
 
+describe("skinForColour", () => {
+  it("follows the firmware's colour codes", () => {
+    expect([1, 2, 3, 0].map(skinForColour)).toEqual(["black", "white", "transparent", "white"]);
+  });
+});
+
 describe("fitView", () => {
   it("never overflows and uses whole scales", () => {
     for (const w of [320, 343, 375, 480, 600, 700, 900, 1148, 2000]) {
@@ -111,6 +118,33 @@ describe.each([
     const rgba = new Uint8ClampedArray(px.length * 4);
     toRgba(px, rgba);
     expect(rgba[3]).toBe(0);
+  });
+
+  it.each(["white", "black", "transparent"] as const)("draws the %s skin with an opaque screen and controls", (skin) => {
+    const px = drawView(m, skin);
+    const rgba = new Uint8ClampedArray(px.length * 4);
+    toRgba(px, rgba, skin);
+    expect(Math.max(...px)).toBeLessThan(COLOURS.length);
+    for (let i = 0; i < px.length; i++) {
+      if (px[i] === 8 || px[i] === 12) expect(rgba[i * 4 + 3]).toBe(255);
+      if (px[i] !== 0) expect(rgba[i * 4 + 3]).toBeGreaterThan(0);
+    }
+  });
+
+  it("shows the board through the transparent skin only", () => {
+    const has = (skin: "white" | "black" | "transparent") => drawView(m, skin).some((c) => c === 13 || c === 14);
+    expect(has("transparent")).toBe(true);
+    expect(has("white")).toBe(false);
+    expect(has("black")).toBe(false);
+  });
+
+  it("gives each skin its own colours", () => {
+    const body = (skin: "white" | "black" | "transparent") => {
+      const out = new Uint8ClampedArray(4);
+      toRgba(Uint8Array.of(2), out, skin);
+      return [...out].join();
+    };
+    expect(new Set([body("white"), body("black"), body("transparent")]).size).toBe(3);
   });
 
   it("paints the word on the body", () => {

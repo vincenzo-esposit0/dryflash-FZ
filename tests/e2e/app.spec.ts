@@ -374,6 +374,30 @@ function dfuse(image: Uint8Array): Buffer {
   return Buffer.concat([body, u32(crc >>> 0)]);
 }
 
+test.describe("device skin", () => {
+  const body = (page: Page) =>
+    page.locator("canvas.art").evaluate((c: HTMLCanvasElement) => [...c.getContext("2d")!.getImageData(30, 40, 1, 1).data].join());
+
+  test("follows the colour setting at once, and stays after a reload", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByText("Drop a firmware")).toBeVisible();
+    const white = await body(page);
+    await page.locator("summary", { hasText: "Device settings" }).click();
+    const colour = page.getByLabel("Colour");
+    await expect(colour).toHaveValue("2");
+    await colour.selectOption("1");
+    await expect.poll(() => body(page)).not.toBe(white);
+    const black = await body(page);
+    await colour.selectOption("3");
+    await expect.poll(() => body(page)).not.toBe(black);
+    const transparent = await body(page);
+    expect(transparent).not.toBe(white);
+    await page.reload();
+    await expect(page.getByText("Drop a firmware")).toBeVisible();
+    await expect.poll(() => body(page)).toBe(transparent);
+  });
+});
+
 test.describe("crash report", () => {
   /** An undefined instruction at the reset vector, and a HardFault handler that spins. */
   function faulting(): Buffer {

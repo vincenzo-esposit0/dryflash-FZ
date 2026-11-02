@@ -788,3 +788,8 @@ Tests: the action's real script against a fake GitHub API for pass, hang, a read
 
 - **Not done yet:** the first release, the `v1` tag, and the milestone's definition of done, using the action from another repository. Until the first release, the action's default package does not exist.
 - **Not tested:** `release.yml`, which can only run for real; a pull request from a fork, except with the fake API's 403; the comment as GitHub renders it, until this CI runs.
+
+### Device skins
+
+The body now follows the device's Color setting at once: white, black or transparent (ADR-0015, addendum), and it stays after a reload. New devices start white. The firmware still reads the colour from OTP at the next power-on,
+as before. The board seen through the transparent body is decoration. E2E: the setting changes the drawing and survives a reload, on Chromium and WebKit. Checked by eye at desktop and phone widths.

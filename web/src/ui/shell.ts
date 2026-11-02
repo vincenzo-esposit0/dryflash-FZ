@@ -20,11 +20,64 @@ export const COLOURS = [
   [0xff, 0xa2, 0x4d, 255], // 10 orange highlight
   [0x2c, 0x2d, 0x38, 255], // 11 slots
   [0xff, 0x96, 0x2a, 255], // 12 LCD glass under the canvas
+  [0x00, 0x00, 0x00, 0], // 13 board inside the body: only the transparent skin shows it
+  [0x00, 0x00, 0x00, 0], // 14 chips on that board
 ] as const;
 
-const [OUTLINE, BODY, LIGHT, SHADOW, SIDE, SIDE_DARK, SURROUND, ORANGE, ORANGE_DARK, ORANGE_LIGHT, SLOT, GLASS] = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+const [OUTLINE, BODY, LIGHT, SHADOW, SIDE, SIDE_DARK, SURROUND, ORANGE, ORANGE_DARK, ORANGE_LIGHT, SLOT, GLASS, TRACE, CHIP] = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
 ];
+
+/** The body's colours. The orange controls and the glass stay the same on every skin, as on the real editions. */
+export type Skin = "white" | "black" | "transparent";
+type Rgba = readonly [number, number, number, number];
+
+const SKINS: Record<Skin, Partial<Record<number, Rgba>>> = {
+  white: {},
+  black: {
+    [OUTLINE]: [0x4a, 0x4b, 0x55, 255],
+    [BODY]: [0x26, 0x27, 0x2e, 255],
+    [LIGHT]: [0x3e, 0x3f, 0x49, 255],
+    [SHADOW]: [0x1b, 0x1c, 0x22, 255],
+    [SIDE]: [0x20, 0x21, 0x27, 255],
+    [SIDE_DARK]: [0x14, 0x15, 0x1a, 255],
+    [SURROUND]: [0x0c, 0x0d, 0x11, 255],
+    [SLOT]: [0x05, 0x05, 0x08, 255],
+  },
+  // Frosted plastic over the page, with the board showing through.
+  transparent: {
+    [OUTLINE]: [0xc9, 0xd0, 0xd8, 255],
+    [BODY]: [0xb4, 0xbd, 0xc8, 72],
+    [LIGHT]: [0xe8, 0xee, 0xf4, 150],
+    [SHADOW]: [0x8e, 0x98, 0xa4, 92],
+    [SIDE]: [0xa8, 0xb2, 0xbe, 110],
+    [SIDE_DARK]: [0x7c, 0x86, 0x92, 110],
+    [SURROUND]: [0x16, 0x18, 0x1d, 240],
+    [SLOT]: [0x1a, 0x1c, 0x22, 235],
+    [TRACE]: [0x6f, 0x8f, 0x86, 170],
+    [CHIP]: [0x2b, 0x30, 0x38, 225],
+  },
+};
+
+/** The skin for the device's colour setting (FuriHalVersionColor in furi_hal_version.h). */
+export function skinForColour(colour: number): Skin {
+  return colour === 1 ? "black" : colour === 3 ? "transparent" : "white";
+}
+
+/** What shows through the transparent body: a board with traces and a few chips. Decoration, not a model of the PCB. */
+function inside(m: Model, u: number, v: number): number {
+  const margin = 12;
+  if (!inBody(m, u - margin, v) || !inBody(m, u + margin, v) || !inBody(m, u, v - margin) || !inBody(m, u, v + margin)) return 0;
+  const chips: [number, number, number, number][] = [
+    [m.width * 0.08, m.height * 0.72, 16, 8],
+    [m.width * 0.62, m.height * 0.14, 14, 10],
+    [m.width * 0.6, m.height * 0.78, 18, 10],
+  ];
+  for (const [x, y, w, h] of chips) if (u >= x && u < x + w && v >= y && v < y + h) return CHIP;
+  const across = Math.floor(v / 2) % 7 === 3 && Math.floor(u / 2) % 9 !== 0;
+  const down = Math.floor(u / 2) % 17 === 5 && Math.floor(v / 2) % 5 !== 0;
+  return across || down ? TRACE : 0;
+}
 
 /** 5×7 capitals for the word on the body. */
 const GLYPHS: Record<string, string[]> = {
@@ -194,14 +247,16 @@ export function artSize(m: Model): { width: number; height: number } {
 }
 
 /** Draws the device: width × height palette indices (COLOURS), row by row. */
-export function drawView(m: Model): Uint8Array {
+export function drawView(m: Model, skin: Skin = "white"): Uint8Array {
   const { width: w, height: h } = artSize(m);
   const px = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const [u, v] = [(x + 0.5) * ART_STEP, (y + 0.5) * ART_STEP];
       if (inBody(m, u, v)) {
-        px[y * w + x] = faceColour(m, u, v);
+        const c = faceColour(m, u, v);
+        const through = skin === "transparent" && (c === BODY || c === SHADOW) ? inside(m, u, v) : 0;
+        px[y * w + x] = through || c;
         continue;
       }
       // The thickness: the outline of the face, repeated downwards.
@@ -226,9 +281,10 @@ export function drawView(m: Model): Uint8Array {
 }
 
 /** RGBA pixels for a canvas. */
-export function toRgba(px: Uint8Array, out: Uint8ClampedArray): void {
+export function toRgba(px: Uint8Array, out: Uint8ClampedArray, skin: Skin = "white"): void {
+  const colours = SKINS[skin];
   for (let i = 0; i < px.length; i++) {
-    const c = COLOURS[px[i]];
+    const c = colours[px[i]] ?? COLOURS[px[i]];
     out[i * 4] = c[0];
     out[i * 4 + 1] = c[1];
     out[i * 4 + 2] = c[2];
