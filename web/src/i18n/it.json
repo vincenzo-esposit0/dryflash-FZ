@@ -118,7 +118,7 @@
   "viaProxy": "{name} caricato da {url}, tramite il proxy di dryflash.",
   "direct": "{name} caricato da {url}.",
   "compatTitle": "Compatibilità",
-  "compatIntro": "I firmware fissati e cosa si è visto funzionare su ciascuno, verificato a mano il {date}. In una milestone successiva lo sostituirà un controllo automatico notturno.",
+  "compatIntro": "I firmware fissati e l'ultima release di ciascuno, come li ha visti la CI notturna in questo emulatore. Ultima scrittura il {date}; cambia quando cambia un risultato, e almeno ogni settimana.",
   "firmware": "Firmware",
   "version": "Versione",
   "licence": "Licenza",
@@ -159,5 +159,8 @@
   "registers": "Registri",
   "recentPcs": "Ultime 64 istruzioni",
   "gaps": "Registri senza comportamento, toccati negli ultimi 100 ms",
-  "noGaps": "Nessuno."
+  "noGaps": "Nessuno.",
+  "no": "No",
+  "latestRelease": "Ultima release",
+  "compatLimits": "\"Avvia le app\" significa che ogni voce del menu principale si è aperta e chiusa, e tra parentesi quante sono. \"OTA reale\" significa che l'updater del firmware ha sostituito un firmware diverso e la flash contiene poi il suo pacchetto byte per byte; lo stack radio resta fuori (ADR-0014). Nulla di questo dice che un firmware funzioni su un dispositivo."
 }

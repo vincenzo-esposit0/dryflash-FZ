@@ -1,10 +1,44 @@
 {
-  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later. What has actually been observed for each pinned firmware, by hand at the end of M4 (docs/BRINGUP_LOG.md). The nightly CI of M6 replaces this file. Values: true = seen working, null = not tested.",
-  "checked": "2026-11-01",
+  "$comment": "SPDX-License-Identifier: GPL-3.0-or-later. Written by scripts/compat-matrix.mjs in the nightly CI, never by hand. true = seen working, false = seen failing, null = could not run. `checked` is the last run that wrote this file.",
+  "checked": "2026-11-02",
+  "commit": null,
   "results": {
-    "official": { "boots": true, "desktop": true, "apps": true, "ota": true },
-    "momentum": { "boots": true, "desktop": true, "apps": null, "ota": null },
-    "unleashed": { "boots": true, "desktop": true, "apps": null, "ota": null },
-    "roguemaster": { "boots": true, "desktop": true, "apps": null, "ota": null }
-  }
+    "official": {
+      "boots": true,
+      "desktop": true,
+      "apps": true,
+      "entries": 10,
+      "ota": true,
+      "problem": null,
+      "verdict": null
+    },
+    "momentum": {
+      "boots": true,
+      "desktop": true,
+      "apps": true,
+      "entries": 11,
+      "ota": true,
+      "problem": null,
+      "verdict": null
+    },
+    "unleashed": {
+      "boots": true,
+      "desktop": true,
+      "apps": true,
+      "entries": 12,
+      "ota": true,
+      "problem": null,
+      "verdict": null
+    },
+    "roguemaster": {
+      "boots": true,
+      "desktop": true,
+      "apps": true,
+      "entries": 15,
+      "ota": true,
+      "problem": null,
+      "verdict": null
+    }
+  },
+  "latest": {}
 }

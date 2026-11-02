@@ -227,11 +227,13 @@ test.describe("links and the proxy", () => {
 });
 
 test.describe("pages", () => {
-  test("/compat lists the firmwares and says what is not tested", async ({ page }) => {
+  test("/compat lists what the nightly run saw, and what that does not mean", async ({ page }) => {
     await page.goto("/compat");
     await expect(page.getByRole("heading", { name: "Compatibility" })).toBeVisible();
-    await expect(page.locator("tbody tr")).toHaveCount(4);
-    await expect(page.locator("tbody")).toContainText("Not tested");
+    expect(await page.locator("tbody tr").count()).toBeGreaterThanOrEqual(4);
+    await expect(page.locator("tbody")).toContainText("Official");
+    await expect(page.getByText("nightly CI")).toBeVisible();
+    await expect(page.getByText("works on a device")).toBeVisible();
   });
 
   test("/about shows the fidelity table from the core", async ({ page }) => {

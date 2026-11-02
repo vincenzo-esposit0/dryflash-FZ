@@ -87,6 +87,9 @@ try {
 }
 
 if (values.junit) write(values.junit, toJunit(result));
-if (values.report) write(values.report, JSON.stringify(result, null, 2));
+if (values.report) {
+  const { fullLog, ...report } = result;
+  write(values.report, JSON.stringify(report, null, 2));
+}
 console.log(`${result.result} after ${(result.virtualMs / 1000).toFixed(1)} s of virtual time`);
 process.exit(result.exitCode);
