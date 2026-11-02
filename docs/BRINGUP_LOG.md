@@ -835,3 +835,13 @@ All four, run here in about 10 minutes. No release newer than the pinned one exi
   firmware's own first screen back.
 - **The silent log is a real limit.** With no log after an OTA on those three, a crash there is found through Furi's fault register and the hang detector only, without the firmware's own record.
 - **Not tested:** `nightly.yml` itself, which can only run on main; a failed result on the page beyond the unit tests; resources after an update on these three, which only `core/tests/ota_official.rs` compares, for Official.
+
+### M6 closed
+
+`nightly.yml`, started by hand on main, passed: on GitHub's Linux runners the matrix gave the same results as here, in 22 minutes with the build. `/compat` on production shows them. The action works from another repository.
+
+- **The bot's commit has not happened yet.** Nothing differed, so the run correctly wrote nothing, and the push to main and the deploy it starts are untested. That path first runs when a result changes, or on 2026-11-09 when the file turns a week old. If it fails, the nightly run goes red.
+- The results on main today came from the local run, and the nightly run confirmed them without rewriting them.
+- Still open from this milestone: why the log goes silent after an OTA on Momentum, Unleashed and RogueMaster; a real proof that the `RangeError` is gone; a crash through the action on real firmware.
+
+Demo: `/compat` on the site, https://github.com/vincenzo-esposit0/dryflash-action-test/pull/1 for the action, and `node runner/bin/dryflash.mjs run <firmware.tgz> --screenshots out` for the runner.

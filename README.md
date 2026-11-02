@@ -6,7 +6,7 @@ Try any Flipper Zero firmware before flashing it to your real device: dryflash e
 real, unmodified release binaries (`.dfu` / update `.tgz`) on an instruction-level model of the
 STM32WB55, with no backend and no hardware.
 
-> **Status: pre-alpha (milestone M5).** Try it at **https://app.dryflash.workers.dev**: drop a
+> **Status: pre-alpha (milestone M6).** Try it at **https://app.dryflash.workers.dev**: drop a
 > firmware `.tgz` or `.dfu` on the page, or open a link with `?fw=<url>`. Firmwares boot to the Desktop on
 > virtual devices saved in your browser, apps run from the card, and a package can be installed by the
 > firmware's own updater. It can be embedded in other pages ([docs/EMBED.md](docs/EMBED.md)).
