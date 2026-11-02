@@ -15,12 +15,17 @@ pub struct AccessStat {
     /// PC of the first instruction that made this access.
     pub first_pc: u32,
     pub last_write: Option<u32>,
+    /// Cycle counter at the first and the last access, to within one run slice.
+    pub first_cycles: u64,
+    pub last_cycles: u64,
 }
 
 impl AccessStat {
-    fn record(&mut self, write: bool, value: Option<u32>, pc: u32) {
+    fn record(&mut self, write: bool, value: Option<u32>, pc: u32, now: u64) {
+        self.last_cycles = now;
         if self.reads == 0 && self.writes == 0 {
             self.first_pc = pc;
+            self.first_cycles = now;
         }
         if write {
             self.writes += 1;
@@ -42,6 +47,15 @@ pub struct DigestEvent {
     pub what: String,
 }
 
+/// A block the emulator has no behavioural model for, touched recently.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GapTouch {
+    pub block: String,
+    pub registers: Vec<String>,
+    /// One of them had not been touched before `new_since`: code that had not run until now.
+    pub new: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Digest {
     /// Accesses to addresses with nothing mapped (BusFault on hardware).
@@ -52,19 +66,27 @@ pub struct Digest {
     /// are latched with the right reset value and write mask (ADR-0010).
     pub latched: BTreeMap<u32, AccessStat>,
     pub events: Vec<DigestEvent>,
+    /// Cycle counter at the start of the current run slice.
+    pub now: u64,
 }
 
 impl Digest {
     pub fn unmapped(&mut self, addr: u32, write: bool, value: Option<u32>, pc: u32) {
-        self.unmapped.entry(addr).or_default().record(write, value, pc);
+        self.unmapped
+            .entry(addr)
+            .or_default()
+            .record(write, value, pc, self.now);
     }
 
     pub fn unimplemented(&mut self, addr: u32, write: bool, value: Option<u32>, pc: u32) {
-        self.unimplemented.entry(addr).or_default().record(write, value, pc);
+        self.unimplemented
+            .entry(addr)
+            .or_default()
+            .record(write, value, pc, self.now);
     }
 
     pub fn latched(&mut self, addr: u32, write: bool, value: Option<u32>, pc: u32) {
-        self.latched.entry(addr).or_default().record(write, value, pc);
+        self.latched.entry(addr).or_default().record(write, value, pc, self.now);
     }
 
     pub fn event(&mut self, cycles: u64, what: impl Into<String>) {
@@ -72,6 +94,23 @@ impl Digest {
             cycles,
             what: what.into(),
         });
+    }
+
+    /// What was touched since `since` (cycles) with no behavioural model behind it, by block.
+    pub fn gaps_since(&self, since: u64, new_since: u64) -> Vec<GapTouch> {
+        let mut out: BTreeMap<String, GapTouch> = BTreeMap::new();
+        let unmodelled = self.unimplemented.iter().chain(self.latched.iter());
+        for (addr, st) in unmodelled.filter(|(_, st)| st.last_cycles >= since && st.total() > 0) {
+            let block = block_of(*addr).map_or_else(|| Self::name_of(*addr), |b| b.name.to_string());
+            let row = out.entry(block.clone()).or_insert(GapTouch {
+                block,
+                registers: Vec::new(),
+                new: false,
+            });
+            row.new |= st.first_cycles >= new_since;
+            row.registers.push(Self::name_of(*addr));
+        }
+        out.into_values().collect()
     }
 
     /// Human-readable name of an address: `RCC.CR`, `RCC+0x0A0`, `PPB 0xE000EF34`, or the address.

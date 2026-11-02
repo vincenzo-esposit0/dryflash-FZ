@@ -14,6 +14,7 @@ pub mod hsem;
 pub mod i2c;
 pub mod ipcc;
 pub mod irq;
+pub mod iwdg;
 pub mod lptim;
 pub mod rcc;
 pub mod regfile;
@@ -83,6 +84,7 @@ enum Slot {
     Dma(usize),
     Flash,
     Rng,
+    Iwdg,
     Lptim(usize),
     Generic(usize),
 }
@@ -105,6 +107,7 @@ pub struct Periphs {
     pub hsem: hsem::Hsem,
     pub ipcc: ipcc::Ipcc,
     pub rng: rng::Rng,
+    pub iwdg: iwdg::Iwdg,
     /// LPTIM1 (Furi's tickless idle timer), LPTIM2.
     pub lptim: Vec<lptim::Lptim>,
     /// Register-file-only peripherals.
@@ -184,6 +187,7 @@ impl Periphs {
                     Slot::Dma(i)
                 }
                 "RNG" => Slot::Rng,
+                "IWDG" => Slot::Iwdg,
                 "LPTIM1" | "LPTIM2" => {
                     lptim.push(lptim::Lptim::new(d));
                     Slot::Lptim(lptim.len() - 1)
@@ -218,6 +222,7 @@ impl Periphs {
             hsem: hsem::Hsem::new(),
             ipcc: ipcc::Ipcc::new(),
             rng: rng::Rng::new(rng::DEFAULT_SEED),
+            iwdg: iwdg::Iwdg::new(),
             lptim,
             generic,
             map,
@@ -385,6 +390,7 @@ impl Periphs {
         self.dma.iter_mut().for_each(|d| d.reset());
         self.flash.reset();
         self.rng.reset();
+        self.iwdg.reset();
         self.lptim.iter_mut().for_each(|l| l.reset());
         if kind == ResetKind::PowerOn {
             // The RTC is in the backup domain: only power-on (or BDRST) resets it.
@@ -493,6 +499,7 @@ impl Periphs {
             Slot::Dma(i) => &self.dma[i].regs,
             Slot::Flash => &self.flash.regs,
             Slot::Rng => &self.rng.regs,
+            Slot::Iwdg => &self.iwdg.regs,
             Slot::Lptim(i) => &self.lptim[i].regs,
             Slot::Generic(i) => &self.generic[i],
         }
@@ -537,6 +544,7 @@ impl Periphs {
             Slot::Dma(i) => self.dma[i].regs.read(word_off),
             Slot::Flash => self.flash.regs.read(word_off),
             Slot::Rng => self.rng.read(word_off),
+            Slot::Iwdg => self.iwdg.read(word_off),
             Slot::Lptim(i) => {
                 let ns = self.now_ns(ctx.now);
                 let v = self.lptim[i].read(word_off, ns);
@@ -635,6 +643,10 @@ impl Periphs {
                 h
             }
             Slot::Rng => self.rng.write(word_off, value),
+            Slot::Iwdg => {
+                let ns = self.now_ns(ctx.now);
+                self.iwdg.write(word_off, value, ns)
+            }
             Slot::Lptim(i) => {
                 let ns = self.now_ns(ctx.now);
                 self.lptim_clocks();
@@ -701,6 +713,11 @@ impl Periphs {
                 "RTC",
                 Partial,
                 "calendar, init mode, write protection, backup registers; no alarms/wakeup",
+            ),
+            (
+                "IWDG",
+                Partial,
+                "resets at zero, with its reset flag; window not enforced",
             ),
             (
                 "RNG",

@@ -88,8 +88,8 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 
 ## M6 — Crash detection + headless
 
-- ☐ Full crash report (§7), symbolication via ELF, emulator-gap vs firmware-bug labelling
-- ☐ Hang detection
+- ☑ Full crash report (§7), symbolication via ELF, emulator-gap vs firmware-bug labelling (ADR-0016)
+- ☑ Hang detection, and the independent watchdog
 - ☐ `npx dryflash run`, YAML scripts, default smoke test, JUnit, screenshots, exit codes
 - ☐ GitHub Action `action@v1` with PR comment
 - ☐ Nightly compatibility matrix + `/compat` page (Official, Momentum, Unleashed, RogueMaster)

@@ -47,7 +47,7 @@ Posted to the parent window, each with `source: "dryflash"`:
 | `ready` | `version` | The emulator is up |
 | `booted` | | The firmware logged that its services started |
 | `desktopReached` | | The firmware selected a Desktop animation (provisional, see below) |
-| `crashed` | `summary` | Furi recorded a crash, or the emulator stopped |
+| `crashed` | `summary` | The firmware crashed or hung, and the emulator stopped |
 | `frame` | `bits` (ArrayBuffer) | Only with `&frames=1`, at most 5 per second. 1 KiB: rows top to bottom, MSB leftmost, 1 = dark |
 | `screenshot` | `png` (ArrayBuffer) | Answer to the command |
 | `error` | `message` | Loading or running failed |

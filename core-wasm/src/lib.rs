@@ -10,6 +10,7 @@ use dryflash_core::board::otp::BoardInfo;
 use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
 use dryflash_core::board::{Battery, Button};
 use dryflash_core::bus::Fidelity;
+use dryflash_core::crash::{FirmwareInfo, Report, json_str};
 use dryflash_core::loader::dfu;
 use dryflash_core::loader::elf::Symbols;
 use dryflash_core::loader::package::{Package, install_resources, stage_ota};
@@ -46,6 +47,8 @@ pub enum Exit {
     IdleForever = 1,
     Stopped = 2,
     BootLoop = 3,
+    Crashed = 4,
+    Hung = 5,
 }
 
 #[wasm_bindgen]
@@ -55,6 +58,8 @@ pub struct Emulator {
     loaded: bool,
     /// Function names from the firmware's ELF, for the digest.
     symbols: Option<Symbols>,
+    /// What crash reports say about the firmware.
+    firmware: FirmwareInfo,
     /// Virtual-device settings, applied to each new machine.
     board: BoardInfo,
     uid64: u64,
@@ -77,6 +82,7 @@ impl Emulator {
         m.bus.provision_otp(&self.board);
         m.bus.set_uid64(self.uid64);
         apply_battery(&mut m, &self.battery);
+        m.set_crash_entries(&crash_entries(self.symbols.as_ref()));
         if let Some(old) = self.m.bus.periphs.remove_sd() {
             let mut card = SdCard::new(old.capacity_blocks(), BlockStore::default());
             card.store = old.store;
@@ -85,6 +91,17 @@ impl Emulator {
         }
         m
     }
+}
+
+/// Furi's crash code, from the ELF (furi/core/check.c, firmware 1.5.1).
+fn crash_entries(symbols: Option<&Symbols>) -> Vec<u32> {
+    let Some(s) = symbols else {
+        return Vec::new();
+    };
+    ["__furi_crash_implementation", "__furi_halt_implementation"]
+        .iter()
+        .filter_map(|n| s.address_of(n))
+        .collect()
 }
 
 /// The same battery state for the fuel gauge and the charger.
@@ -104,21 +121,6 @@ impl Default for Emulator {
     }
 }
 
-fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
 #[wasm_bindgen]
 impl Emulator {
     #[wasm_bindgen(constructor)]
@@ -127,6 +129,7 @@ impl Emulator {
             m: Machine::new(),
             loaded: false,
             symbols: None,
+            firmware: FirmwareInfo::default(),
             board: BoardInfo::default(),
             uid64: 0,
             battery: Battery::default(),
@@ -369,7 +372,34 @@ impl Emulator {
     /// Function names from the firmware's ELF, used by `digest_text`.
     pub fn load_symbols(&mut self, elf: &[u8]) -> Result<(), String> {
         self.symbols = Some(Symbols::from_elf(elf).map_err(|e| format!("not a readable ELF: {e}"))?);
+        self.m.set_crash_entries(&crash_entries(self.symbols.as_ref()));
         Ok(())
+    }
+
+    /// What crash reports say about the firmware. The core cannot know its name or its file's hash.
+    pub fn set_firmware_info(&mut self, name: String, version: Option<String>, sha256: Option<String>) {
+        self.firmware = FirmwareInfo { name, version, sha256 };
+    }
+
+    fn last_report(&self) -> Option<Report> {
+        let c = self.m.captures.last()?;
+        Some(Report::new(c, &self.m.bus, self.symbols.as_ref(), &self.firmware))
+    }
+
+    /// The latest crash report (BRIEF §7) as JSON, if there is one since power-on.
+    pub fn report_json(&self) -> Option<String> {
+        self.last_report().map(|r| r.to_json())
+    }
+
+    /// The latest crash report as Markdown.
+    pub fn report_markdown(&self) -> Option<String> {
+        self.last_report().map(|r| r.to_markdown())
+    }
+
+    /// The display as it was at the latest crash report, as a PNG.
+    pub fn report_png(&self) -> Option<Vec<u8>> {
+        let c = self.m.captures.last()?;
+        Some(dryflash_core::trace::png::lcd(&c.lcd, 4, true))
     }
 
     /// Virtual-device setting Sleep Method = Legacy (ADR-0012); applies at the next power-on.
@@ -409,6 +439,14 @@ impl Emulator {
             RunExit::BootLoop { resets } => {
                 self.last_stop = format!("boot loop: {resets} resets");
                 Exit::BootLoop
+            }
+            RunExit::Crashed => {
+                self.last_stop = self.last_report().map_or(String::new(), |r| r.summary);
+                Exit::Crashed
+            }
+            RunExit::Hung => {
+                self.last_stop = self.last_report().map_or(String::new(), |r| r.summary);
+                Exit::Hung
             }
         }
     }

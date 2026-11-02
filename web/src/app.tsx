@@ -7,6 +7,7 @@ import type {
   CardEntry,
   CrashRecord,
   FidelityRow,
+  CrashReport,
   FromWorker,
   Status,
   ToWorker,
@@ -85,6 +86,85 @@ interface Stop {
   reason: string;
   crashes: CrashRecord[];
   digest: string;
+  report: CrashReport | null;
+  markdown: string | null;
+  png: ArrayBuffer | null;
+}
+
+/** The report on why the emulator stopped (BRIEF §7). Its own text stays in English, as in the files. */
+function CrashPanel({ stop }: { stop: Stop }) {
+  const r = stop.report!;
+  const file = `dryflash-crash-${Math.round(r.atMs)}ms`;
+  return (
+    <div class="report">
+      <p class={`verdict ${r.verdict}`}>
+        <strong>{tr(`verdict_${r.verdict}` as Key)}</strong>
+      </p>
+      <p>{r.summary}</p>
+      <ul class="basis">
+        {r.basis.map((b) => (
+          <li>{b}</li>
+        ))}
+      </ul>
+      <p class="hint">{tr("verdictNote")}</p>
+      <div class="toolbar">
+        <button onClick={() => download(`${file}.json`, JSON.stringify(r, null, 2), "application/json")}>
+          {tr("downloadJson")}
+        </button>
+        {stop.markdown && (
+          <button onClick={() => download(`${file}.md`, stop.markdown!, "text/markdown")}>{tr("downloadMarkdown")}</button>
+        )}
+        {stop.png && <button onClick={() => download(`${file}.png`, stop.png!, "image/png")}>{tr("downloadPng")}</button>}
+      </div>
+      {r.furi && (
+        <p>
+          {tr("furiRecord")}: {r.furi.task ?? "?"} — {r.furi.message}
+        </p>
+      )}
+      <h3>{tr("backtrace")}</h3>
+      <p class="hint">{tr("backtraceNote")}</p>
+      <ul class="crashes frames">
+        {r.backtrace.map((f) => (
+          <li>
+            {f.address} {f.symbol ?? "?"} ({f.source})
+          </li>
+        ))}
+      </ul>
+      <h3>{tr("registers")}</h3>
+      <p class="hint">{r.stateFrom}</p>
+      <pre>
+        {Object.entries(r.registers)
+          .map(([n, v]) => `${n.padEnd(8)}${v}`)
+          .join("\n")}
+      </pre>
+      {r.faultCauses.length > 0 && (
+        <ul class="basis">
+          {r.faultCauses.map((c) => (
+            <li>{c}</li>
+          ))}
+        </ul>
+      )}
+      <details>
+        <summary>{tr("recentPcs")}</summary>
+        <p class="hint">{r.recentPcsNote}</p>
+        <pre>{r.recentPcs.map((p) => `${p.pc} ${p.symbol ?? ""}`).join("\n")}</pre>
+      </details>
+      <details>
+        <summary>{tr("gaps")}</summary>
+        {r.gaps.length === 0 ? (
+          <p class="hint">{tr("noGaps")}</p>
+        ) : (
+          <ul class="basis">
+            {r.gaps.map((g) => (
+              <li>
+                {g.block}: {g.registers.join(", ")}
+              </li>
+            ))}
+          </ul>
+        )}
+      </details>
+    </div>
+  );
 }
 
 /** The pixel-art device (ADR-0015), with the real canvas and buttons on its face. */
@@ -655,7 +735,8 @@ export function App({ embed = false }: { embed?: boolean }) {
           break;
         case "crashes":
           setCrashes(m.crashes);
-          if (m.crashes.length) toParent({ type: "crashed", summary: m.crashes[m.crashes.length - 1].message });
+          // Sent at power-on, so what is left of the last stop goes too. A crash stops, and tells the parent then.
+          if (!m.crashes.length) setStop(null);
           break;
         case "loaded":
           setFirmware(m.name);
@@ -708,7 +789,14 @@ export function App({ embed = false }: { embed?: boolean }) {
           setStatus(m.status);
           break;
         case "stopped":
-          setStop({ reason: m.reason, crashes: m.crashes, digest: m.digest });
+          setStop({
+            reason: m.reason,
+            crashes: m.crashes,
+            digest: m.digest,
+            report: m.report,
+            markdown: m.markdown,
+            png: m.png,
+          });
           toParent({ type: "crashed", summary: m.crashes[m.crashes.length - 1]?.message ?? m.reason });
           break;
         case "error":
@@ -1072,7 +1160,7 @@ export function App({ embed = false }: { embed?: boolean }) {
                 {tr("error")}: {error}
               </p>
             )}
-            {stop && (
+            {stop && !running && (
               <div class="error" role="alert">
                 <strong>{tr("stopped")}:</strong> {stop.reason}
               </div>
@@ -1182,6 +1270,7 @@ export function App({ embed = false }: { embed?: boolean }) {
                 <>
                   <section class="tab-section">
                     <h2>{tr("crashPanel")}</h2>
+                    {stop?.report && <CrashPanel stop={stop} />}
                     {crashes.length === 0 && !stop?.crashes.length ? (
                       <p class="hint">{tr("noCrashes")}</p>
                     ) : (

@@ -216,6 +216,9 @@ impl Cpu {
             Fault::DivideByZero => (EXC_USAGEFAULT, CFSR_DIVBYZERO),
         };
         self.sys.cfsr |= bits;
+        if self.first_fault.is_none() {
+            self.first_fault = Some(self.snapshot(bus, pc, Some(fault)));
+        }
         self.events.push(CpuEvent::Fault {
             cycles: self.cycles,
             fault,

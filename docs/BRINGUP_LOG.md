@@ -688,3 +688,39 @@ line, and it fails without the change. This does not fix the `RangeError`: if it
 Result here: **46 of 46 on Chromium and WebKit** (23 tests per engine).
 
 **M5 is not closed:** the Hub's "Try in emulator" link is still to be confirmed by the maintainer.
+
+## M6 — Crash detection + headless
+
+### Checkpoint 1 — crash report, hang detection, watchdog
+
+Everything from BRIEF §7 now ends in a report, and the emulator stops there. Decisions in ADR-0016.
+
+- **Crashes.** `__furi_crash_implementation` (furi/core/check.c) prints `[CRASH][task] message`, r0–r11 and lr on USART1 before
+  resetting, and HardFault, BusFault, UsageFault and MemManage all go that way (furi_hal_interrupt.c). The core reads that record,
+  so it works without an ELF. Builds that halt instead of resetting are found by their "System halted" line.
+- **Faults.** The first fault is recorded before its exception is taken: registers, CFSR, BFAR, MMFAR, 256 stack words, last 64 PCs.
+- **Hangs.** No WFI, display change or input for 5 s in one 256-byte span of code, or for 30 s anywhere. Off when the firmware's
+  Sleep Method is not Legacy, because that idle loop spins here (ADR-0012).
+- **Watchdog.** IWDG is modelled (`periph/iwdg.rs`), with RCC's reset flag; the window is not enforced. Firmware 1.5.1 never starts it.
+- **Report.** JSON and Markdown from the core, the display as PNG, and a panel in Diagnostics. A backtrace from a stack scan, checked
+  against BL/BLX call sites and named with the ELF. A verdict with the reasons it rests on.
+- **With an ELF**, the core stops briefly on entering Furi's crash code. Without one, a `furi_check` report's last 64 PCs are Furi's
+  own printing, and the report says so.
+- A crash now stops the emulator (BRIEF §1); Resume continues into the reboot, as the device would.
+
+Tests: `core/tests/crash_report.rs` has small firmwares for hang, fault, undefined instruction and watchdog, and the official
+firmware with a fault, a branch into Furi's crash code and a hang patched into `loader_show_menu`, reached by pressing OK. Boot,
+SD, apps and real OTA still pass with the detector on. Official, Momentum, Unleashed and RogueMaster ran 2 virtual minutes idle on the
+Desktop with no false alarm. E2E: 50 of 50 on Chromium and WebKit, including the panel, its three downloads and axe; Firefox in CI only.
+`cpu-bench`, 5 runs each: 111–162 MIPS before the PC ring and 166–177 after, so no cost shows above this machine's noise.
+
+- A first verdict called every crash "unclear": PWR and SYSCFG are touched all the time in the idle path. Only registers first
+  touched in the last second now count against the firmware being at fault; the rest are still listed.
+- **Limits.** A task blocked for ever while the idle task sleeps is not a hang by §7's definition, and is not detected: M3's Desktop
+  deadlock would not have been. A script's timeout has to catch that (next checkpoint). The verdict is a heuristic and has only been
+  tried on the cases above. The report's own text stays in English in the Italian UI.
+- **Not tested:** a boot loop or a Furi halt on real firmware (synthetic only for the loop; parsing only for the halt); the watchdog on any
+  real firmware; a crash in the browser with an ELF loaded.
+
+Demo: `cargo test --release -p dryflash-core --test crash_report -- --include-ignored`. On the page, drop a `.dfu` that faults: the E2E
+test `crash report` builds one.

@@ -2,7 +2,7 @@
 // Needs the pinned firmware: node scripts/fetch-firmware.mjs official
 import AxeBuilder from "@axe-core/playwright";
 import { test as base, expect, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const TGZ = resolve(__dirname, "../../firmware/cache/official/flipper-z-f7-update-1.5.1.tgz");
@@ -336,5 +336,92 @@ test.describe("accessibility", () => {
     const menu = await screen(page);
     await page.keyboard.press("ArrowDown");
     await expectScreenChanges(page, menu);
+  });
+});
+
+/** A DfuSe file (ST UM0391) holding `image` at the start of flash. */
+function dfuse(image: Uint8Array): Buffer {
+  const u32 = (v: number) => {
+    const b = Buffer.alloc(4);
+    b.writeUInt32LE(v);
+    return b;
+  };
+  const name = Buffer.alloc(255);
+  name.write("test");
+  const target = Buffer.concat([
+    Buffer.from("Target\0"),
+    u32(1),
+    name,
+    u32(8 + image.length),
+    u32(1),
+    u32(0x0800_0000),
+    u32(image.length),
+    Buffer.from(image),
+  ]);
+  const body = Buffer.concat([
+    Buffer.from("DfuSe\x01"),
+    u32(11 + target.length),
+    Buffer.from([1]),
+    target,
+    Buffer.from([0xff, 0xff, 0x11, 0xdf, 0x83, 0x04, 0x1a, 0x01]),
+    Buffer.from("UFD\x10"),
+  ]);
+  let crc = 0xffffffff;
+  for (const byte of body) {
+    crc ^= byte;
+    for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return Buffer.concat([body, u32(crc >>> 0)]);
+}
+
+test.describe("crash report", () => {
+  /** An undefined instruction at the reset vector, and a HardFault handler that spins. */
+  function faulting(): Buffer {
+    const image = new Uint8Array(0x200);
+    const view = new DataView(image.buffer);
+    view.setUint32(0, 0x2003_0000, true);
+    view.setUint32(4, 0x0800_0101, true);
+    view.setUint32(12, 0x0800_0181, true);
+    view.setUint16(0x100, 0xde00, true); // udf #0
+    view.setUint16(0x180, 0xe7fe, true); // b .
+    return dfuse(image);
+  }
+
+  test("a fault followed by a hang stops the emulator with a report to download", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByText("Drop a firmware")).toBeVisible();
+    await page.locator(".drop input").setInputFiles({ name: "bad.dfu", mimeType: "application/octet-stream", buffer: faulting() });
+    await expect(page.getByRole("alert")).toContainText("Hang: 5 s", { timeout: 30_000 });
+    await page.getByRole("tab", { name: "Diagnostics" }).click();
+    await expect(page.locator(".verdict")).toContainText("Could be either");
+    await expect(page.locator(".report")).toContainText("UNDEFINSTR");
+
+    const [json] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download JSON" }).click()]);
+    const report = JSON.parse(readFileSync(await json.path(), "utf8"));
+    expect(report.kind).toBe("hang");
+    expect(report.verdict).toBe("unclear");
+    expect(report.firmware.name).toBe("bad.dfu");
+    expect(report.firmware.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.registers.pc).toBe("0x08000100");
+    expect(report.recentPcs.length).toBeGreaterThan(0);
+    const [md] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download Markdown" }).click()]);
+    expect(readFileSync(await md.path(), "utf8")).toContain("# dryflash crash report");
+    const [png] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download screen" }).click()]);
+    expect(readFileSync(await png.path()).subarray(1, 4).toString()).toBe("PNG");
+
+    // Resuming is allowed: the alert goes, and the report stays to read.
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.locator(".report")).toBeVisible();
+  });
+
+  test("the panel has no accessibility violations", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByText("Drop a firmware")).toBeVisible();
+    await page.locator(".drop input").setInputFiles({ name: "bad.dfu", mimeType: "application/octet-stream", buffer: faulting() });
+    await expect(page.getByRole("alert")).toContainText("Hang: 5 s", { timeout: 30_000 });
+    await page.getByRole("tab", { name: "Diagnostics" }).click();
+    const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
+    expect(violations.map((v) => v.id)).toEqual([]);
   });
 });

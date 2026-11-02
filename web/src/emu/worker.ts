@@ -95,11 +95,15 @@ function stepMs(ms: number): boolean {
   for (const b of presses.due(e.virtual_ms())) e.set_button(b, false);
   if (exit === Exit.Budget) return true;
   running = false;
+  const png = e.report_png();
   post({
     type: "stopped",
     reason: e.last_stop(),
     crashes: JSON.parse(e.crashes_json()),
     digest: e.digest_text(),
+    report: JSON.parse(e.report_json() ?? "null"),
+    markdown: e.report_markdown() ?? null,
+    png: png ? png.slice().buffer : null,
   });
   return false;
 }
@@ -117,7 +121,7 @@ function slice() {
       lag = pacer.behind(performance.now(), emu.virtual_ms());
     }
   }
-  publish(false);
+  publish(!ok);
   schedule(turbo || pacer.behind(performance.now(), emu.virtual_ms()) > 0 ? 0 : 4);
 }
 
@@ -246,6 +250,7 @@ async function activate(d: DeviceMeta) {
   card = await openCardRetrying(d.id);
   const next = new Emulator();
   applySettings(next, d);
+  next.set_firmware_info(d.firmware ?? "", d.firmwareVersion ?? undefined, d.firmwareSha256 ?? undefined);
   next.sd_restore(await card.load());
   const flash = card.kind === "none" ? null : await devices!.read(d.id, "flash");
   const ob = await devices!.read(d.id, "ob");
@@ -295,6 +300,14 @@ async function saveDevice(changes: Partial<DeviceMeta>) {
   device = { ...device!, ...changes };
   await devices!.save(device);
   await reportDevices();
+}
+
+/** What was installed: on the device, and for the emulator's crash reports. */
+async function recordFirmware(name: string, version: string | null, file: Uint8Array<ArrayBuffer>) {
+  const digest = await crypto.subtle.digest("SHA-256", file);
+  const sha256 = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  emu?.set_firmware_info(name, version ?? undefined, sha256);
+  await saveDevice({ firmware: name, firmwareVersion: version, firmwareSha256: sha256 });
 }
 
 function powerOn() {
@@ -355,7 +368,7 @@ function handle(m: ToWorker) {
         if (m.ota && isPackage) {
           const { info } = JSON.parse(emu.start_ota(bytes));
           post({ type: "otaStarted", name: m.name, info });
-          queue("saving the device", () => saveDevice({ firmware: m.name }));
+          queue("saving the device", () => recordFirmware(m.name, info, bytes));
           running = true;
           restartPacing();
           void flushCard();
@@ -370,7 +383,7 @@ function handle(m: ToWorker) {
         powerOn();
         void flushCard();
         saveFlash();
-        queue("saving the device", () => saveDevice({ firmware: m.name }));
+        queue("saving the device", () => recordFirmware(m.name, packageInfo?.info ?? null, bytes));
         break;
       }
       case "flush":

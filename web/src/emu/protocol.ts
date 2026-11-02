@@ -28,6 +28,27 @@ export interface CrashRecord {
   message: string;
 }
 
+/** `Report::to_json` in core/src/crash.rs. */
+export interface CrashReport {
+  firmware: { name: string; version: string | null; sha256: string | null };
+  atMs: number;
+  kind: string;
+  summary: string;
+  verdict: "firmware" | "emulator" | "unclear";
+  verdictLabel: string;
+  basis: string[];
+  stateFrom: string;
+  registers: Record<string, string>;
+  faultCauses: string[];
+  furi: { task: string | null; message: string; registers: Record<string, string> } | null;
+  backtrace: { address: string; symbol: string | null; source: string }[];
+  recentPcsNote: string;
+  recentPcs: { pc: string; symbol: string | null }[];
+  inputs: { atMs: number; button: string; pressed: boolean }[];
+  gaps: { block: string; registers: string[] }[];
+  logTail: string;
+}
+
 export type ToWorker =
   /** First message. `ephemeral`: keep nothing and touch no saved device (the embed page). */
   | { type: "init"; ephemeral: boolean }
@@ -101,4 +122,13 @@ export type FromWorker =
   | { type: "lights"; rgbw: [number, number, number, number] }
   | { type: "log"; bytes: ArrayBuffer }
   | { type: "status"; status: Status }
-  | { type: "stopped"; reason: string; crashes: CrashRecord[]; digest: string };
+  | {
+      type: "stopped";
+      reason: string;
+      crashes: CrashRecord[];
+      digest: string;
+      /** Crash report (BRIEF §7), when the stop has one. */
+      report: CrashReport | null;
+      markdown: string | null;
+      png: ArrayBuffer | null;
+    };
