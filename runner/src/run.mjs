@@ -2,6 +2,7 @@
 // Runs a script against a firmware and says how it went (BRIEF §10).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { toBraille } from "./braille.mjs";
 import { pngToFrame } from "./png.mjs";
 import { ScriptError } from "./script.mjs";
 import { frameDistance, Session, Stopped, TimedOut } from "./session.mjs";
@@ -28,7 +29,7 @@ export function run(o) {
   const say = o.log ?? (() => {});
   const session = new Session({ firmware: o.firmware, name: o.name, elf: o.elf, timeoutMs: o.timeoutS * 1000 });
   const steps = [];
-  const out = { firmware: o.name, exitCode: EXIT.pass, result: "pass", steps, report: null, virtualMs: 0, logTail: "" };
+  const out = { firmware: o.name, exitCode: EXIT.pass, result: "pass", steps, report: null, screen: null, virtualMs: 0, logTail: "" };
   if (o.screenshots) mkdirSync(o.screenshots, { recursive: true });
   const shot = (name) => {
     if (o.screenshots) writeFileSync(join(o.screenshots, `${basename(name, ".png")}.png`), session.png());
@@ -69,6 +70,7 @@ export function run(o) {
       out.result = out.exitCode === EXIT.emulator ? "emulator-limitation" : "fail";
       record(step.name, ms, "failed", err.message, err.report?.basis?.join(" "));
       say(`     ${err.report?.verdictLabel ?? "No report"}: ${err.report?.basis?.join(" ") ?? ""}`);
+      if (err.png) out.screen = toBraille(pngToFrame(err.png));
       if (o.screenshots) {
         if (err.png) writeFileSync(join(o.screenshots, "crash.png"), err.png);
         if (err.report) writeFileSync(join(o.screenshots, "crash.json"), JSON.stringify(err.report, null, 2));
@@ -89,6 +91,7 @@ export function run(o) {
   out.virtualMs = session.virtualMs;
   out.logTail = session.log.slice(-4096);
   out.digest = session.digest();
+  out.screen ??= toBraille(session.frame());
   if (o.screenshots) {
     writeFileSync(join(o.screenshots, "digest.txt"), out.digest);
     if (!out.report) shot("final");

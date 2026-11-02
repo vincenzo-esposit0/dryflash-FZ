@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: dryflash smoke test
+description: Runs a Flipper Zero firmware build in the dryflash emulator and reports on the pull request. A smoke test, not a hardware certification.
+branding:
+  icon: cpu
+  color: orange
+inputs:
+  firmware:
+    description: Path to the firmware build, .tgz or .dfu
+    required: true
+  elf:
+    description: Path to its ELF, to name functions in crash reports
+    required: false
+  script:
+    description: Path to a YAML input script. Without one, the default smoke test runs
+    required: false
+  timeout:
+    description: Seconds of virtual time for the whole script
+    required: false
+    default: "300"
+  comment:
+    description: Comment the result on the pull request
+    required: false
+    default: "true"
+  artifact-name:
+    description: Name of the artifact with the screenshots, JUnit and crash report
+    required: false
+    default: dryflash
+  github-token:
+    description: Token to comment with. The job needs permission pull-requests write
+    required: false
+    default: ${{ github.token }}
+  package:
+    description: Which runner to use, as npx understands it. By default the matching GitHub Release
+    required: false
+    default: https://github.com/vincenzo-esposit0/dryflash-FZ/releases/download/v0.1.0/dryflash-0.1.0.tgz
+outputs:
+  result:
+    description: pass, fail or emulator-limitation
+    value: ${{ steps.run.outputs.result }}
+  exit-code:
+    description: 0 pass, 1 firmware failure, 2 emulator limitation, 3 usage error
+    value: ${{ steps.run.outputs.exit-code }}
+  junit:
+    description: Path to the JUnit file
+    value: ${{ steps.run.outputs.junit }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+    - id: run
+      shell: bash
+      # Through the environment, never interpolated into the script: these values come from the workflow's author
+      # and its inputs, and a branch name can be among them.
+      env:
+        DRYFLASH_FIRMWARE: ${{ inputs.firmware }}
+        DRYFLASH_ELF: ${{ inputs.elf }}
+        DRYFLASH_SCRIPT: ${{ inputs.script }}
+        DRYFLASH_TIMEOUT: ${{ inputs.timeout }}
+        DRYFLASH_COMMENT: ${{ inputs.comment }}
+        DRYFLASH_PACKAGE: ${{ inputs.package }}
+        DRYFLASH_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/run.mjs"
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.run.outputs.dir }}
+        if-no-files-found: warn
+    - shell: bash
+      env:
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: exit "${EXIT_CODE:-3}"

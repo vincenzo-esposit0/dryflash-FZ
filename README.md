@@ -25,7 +25,7 @@ on hardware.
 |---|---|
 | `core/` | Rust emulator core (CPU, bus, peripherals, board devices, loaders) |
 | `core-wasm/` | WebAssembly bindings |
-| `runner/` | Headless Node CLI (`npx dryflash run …`) — M6 |
+| `runner/` | Headless Node CLI (`dryflash run …`) |
 | `web/` | Static web app (Vite + Preact) |
 | `proxy/` | Allowlisted CORS proxy (Cloudflare Worker) |
 | `action/` | GitHub Action — M6 |
