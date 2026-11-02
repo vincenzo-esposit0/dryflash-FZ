@@ -278,7 +278,7 @@ No SharedArrayBuffer anywhere.
 
 ## 10. Headless runner (`/runner`) and GitHub Action (`/action`)
 
-- `npx dryflash run <fw> [--elf] [--script smoke.yaml] [--timeout] [--junit] [--screenshots]`.
+- `dryflash run <fw> [--elf] [--script smoke.yaml] [--timeout] [--junit] [--screenshots]`.
 - Same `core-wasm` build loaded in Node; storage on the local file system (temp dir per run).
 - YAML script engine: `wait_for_desktop`, `press`, `long_press`, `wait`, `expect_screen`
   (pixel-exact or tolerance), `expect_no_crash`. Built-in default smoke test.

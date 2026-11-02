@@ -1,7 +1,7 @@
 {
   "name": "dryflash",
-  "version": "0.0.1",
-  "description": "dryflash headless runner \u2014 smoke-test Flipper Zero firmware builds in CI",
+  "version": "0.1.0",
+  "description": "Smoke-tests Flipper Zero firmware builds in CI, in an emulator, with no hardware. Not affiliated with Flipper Devices Inc.",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "bin": {
@@ -18,7 +18,8 @@
     "bin",
     "src",
     "wasm",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
     "yaml": "^2.8.0"
@@ -27,6 +28,16 @@
     "vitest": "5.0.5"
   },
   "scripts": {
-    "test": "vitest run"
-  }
+    "test": "vitest run",
+    "prepack": "node scripts/prepack.mjs"
+  },
+  "keywords": [
+    "flipper-zero",
+    "emulator",
+    "firmware",
+    "smoke-test",
+    "ci"
+  ],
+  "homepage": "https://app.dryflash.workers.dev",
+  "private": true
 }

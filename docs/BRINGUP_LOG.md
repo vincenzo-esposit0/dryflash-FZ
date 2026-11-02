@@ -763,7 +763,7 @@ job with the smoke test on Official, and `deploy` waits for it.
 
 - **Not tested:** the runner on Windows; on Linux until CI runs it; Read screens in Sub-GHz or NFC, which the stubs may not carry: NFC polling in particular has no interrupt line.
   The smoke test only proves the apps open and close.
-- **`npx dryflash` does not work yet:** the package is not on npm, and publishing is the maintainer's call. Use `node runner/bin/dryflash.mjs` after `scripts/build-wasm.sh`.
+- **Not on npm** at this checkpoint. Use `node runner/bin/dryflash.mjs` after `scripts/build-wasm.sh`. (Checkpoint 3 settles how it is released.)
 
 Demo:
 
@@ -773,6 +773,21 @@ Demo:
 The merge's run on main failed in `cpu-fuzz`, seed 25, so `deploy` was skipped: `strh r4, [r0, r2]` with an address of 0xE002C629. Each register was random and outside the
 PPB, which the generator avoids, but their sum was inside it. dryflash models the PPB and this Unicorn harness maps nothing there, so there was nothing to compare, and the CPU was
 not at fault. The fuzzer now counts that as a known case, from the address Unicorn reports. Re-running would not have helped: the seed is the run number, and a re-run keeps it.
+
+### Checkpoint 3 — GitHub Action and npm package
+
+- **Action** (`action/`): runs the runner, comments on the pull request, writes the job summary, uploads the artifact and fails the job on any non-zero exit code. Later runs
+  replace the comment. Inputs reach its script through the environment, and text from the firmware goes into the comment escaped, with no mentions.
+- **BRIEF §10 asks for screenshots in the comment. That is not possible as written:** the REST API cannot attach images to a comment, and `data:` images are not rendered. Hosting them
+  would mean pushing to a branch of the user's repository. So the comment has the last screen as Braille text, 64×16, and the PNGs are in the artifact, one click away.
+- **Package:** `dryflash` 0.1.0, 15 files, 233 kB, as a file on a GitHub Release and not on npm, by the maintainer's decision: no account or token beyond GitHub's. `npx` runs it from that URL, so
+  BRIEF §10's command is now `dryflash run`, reached with `npx --package=<url>`. `"private": true` prevents an accidental `npm publish`. `prepack` refuses to pack without the core and copies the licence.
+- **Releases** (`docs/RELEASE.md`, `.github/workflows/release.yml`): a version tag runs the tests and creates the release with the package attached.
+
+Tests: the action's real script against a fake GitHub API for pass, hang, a read-only token and a bad input; comment escaping; 41 in `runner/test`. CI's `runner` job runs `uses: ./action` with this commit's package.
+
+- **Not done yet:** the first release, the `v1` tag, and the milestone's definition of done, using the action from another repository. Until the first release, the action's default package does not exist.
+- **Not tested:** `release.yml`, which can only run for real; a pull request from a fork, except with the fake API's 403; the comment as GitHub renders it, until this CI runs.
 
 ### Device skins
 
