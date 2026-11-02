@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # ADR-0016 — A crash stops the emulator; hangs and verdicts are explicit heuristics
 
-- Status: **Proposed**
+- Status: **Accepted**
 - Date: 2026-11-02
 - Milestone: M6
 

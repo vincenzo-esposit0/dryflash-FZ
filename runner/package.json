@@ -1,10 +1,32 @@
 {
   "name": "dryflash",
   "version": "0.0.1",
-  "description": "dryflash headless runner — smoke-test Flipper Zero firmware builds in CI",
+  "description": "dryflash headless runner \u2014 smoke-test Flipper Zero firmware builds in CI",
   "license": "GPL-3.0-or-later",
   "type": "module",
-  "bin": { "dryflash": "bin/dryflash.mjs" },
-  "engines": { "node": ">=20" },
-  "repository": { "type": "git", "url": "https://github.com/vincenzo-esposit0/dryflash-FZ" }
+  "bin": {
+    "dryflash": "bin/dryflash.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vincenzo-esposit0/dryflash-FZ"
+  },
+  "files": [
+    "bin",
+    "src",
+    "wasm",
+    "README.md"
+  ],
+  "dependencies": {
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "vitest": "5.0.5"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
 }

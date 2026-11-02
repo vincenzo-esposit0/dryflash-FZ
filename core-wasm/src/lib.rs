@@ -474,6 +474,12 @@ impl Emulator {
         out
     }
 
+    /// The display now, as a PNG scaled by `scale`.
+    pub fn frame_png(&mut self, scale: u32) -> Vec<u8> {
+        let lit = self.m.lights().white > 0;
+        dryflash_core::trace::png::lcd(&self.m.display_frame(), scale.clamp(1, 16), lit)
+    }
+
     /// Changes whenever the LCD content may have changed.
     pub fn display_generation(&self) -> f64 {
         self.m.display_generation() as f64

@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build -w web",
-    "test": "npm test -w web && npm test -w proxy",
+    "test": "npm test -w web && npm test -w proxy && npm test -w runner",
     "e2e": "npm test -w tests/e2e"
   }
 }

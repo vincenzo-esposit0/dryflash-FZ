@@ -131,6 +131,8 @@ pub struct Periphs {
     syscfg: Option<usize>,
     /// microSD card, if inserted.
     pub sd: Option<crate::board::sdcard::SdCard>,
+    pub cc1101: crate::board::cc1101::Cc1101,
+    pub st25r3916: crate::board::st25r3916::St25r3916,
     /// Buttons currently held by the user.
     pub buttons_down: Vec<crate::board::Button>,
 }
@@ -234,6 +236,8 @@ impl Periphs {
             tb_ns: 0,
             syscfg,
             display: crate::board::st7567::St7567::new(),
+            cc1101: crate::board::cc1101::Cc1101::new(),
+            st25r3916: crate::board::st25r3916::St25r3916::new(),
             last_levels: [0; 6],
             sd: None,
             buttons_down: Vec::new(),
@@ -241,17 +245,29 @@ impl Periphs {
     }
 
     /// SPI register write, with the board wiring behind the data register. SPI2 carries the
-    /// display and the SD card, selected by their chip selects; SPI1 devices (radio, NFC) are not
-    /// attached yet, so MISO reads 0xFF (pulled up).
+    /// display and the SD card, SPI1 the radio and the NFC front end, selected by their chip selects.
+    /// With none selected MISO reads 0xFF (pulled up).
     pub fn spi_write(&mut self, i: usize, off: u32, value: u32, size: Size) -> bool {
         let Periphs {
-            spi, gpio, display, sd, ..
+            spi,
+            gpio,
+            display,
+            sd,
+            cc1101,
+            st25r3916,
+            ..
         } = self;
         let mut route = |mosi: u8| -> u8 {
-            if i != 1 {
+            let low = |(port, pin): (usize, u8)| gpio[port].driven_low(pin);
+            if i == 0 {
+                if low(crate::board::CC1101_CS) {
+                    return cc1101.transfer(mosi);
+                }
+                if low(crate::board::NFC_CS) {
+                    return st25r3916.transfer(mosi);
+                }
                 return 0xFF;
             }
-            let low = |(port, pin): (usize, u8)| gpio[port].driven_low(pin);
             if low(crate::board::DISPLAY_CS) {
                 let (port, pin) = crate::board::DISPLAY_A0;
                 display.write(mosi, gpio[port].levels() & (1 << pin) != 0);
@@ -261,7 +277,13 @@ impl Periphs {
                 _ => 0xFF,
             }
         };
-        spi[i].write(off, value, size, &mut route)
+        let handled = spi[i].write(off, value, size, &mut route);
+        if i == 0 {
+            let (port, pin) = crate::board::CC1101_G0;
+            self.gpio[port].drive(pin, self.cc1101.gd0());
+            self.gpio_changed();
+        }
+        handled
     }
 
     /// Inserts a card: the card-detect switch pulls SD_CD low.
@@ -327,6 +349,13 @@ impl Periphs {
             && let Some(card) = &mut self.sd
         {
             card.deselect();
+        }
+        let rose = |(p, pin): (usize, u8)| now[p] & !self.last_levels[p] & (1 << pin) != 0;
+        if rose(crate::board::CC1101_CS) {
+            self.cc1101.deselect();
+        }
+        if rose(crate::board::NFC_CS) {
+            self.st25r3916.deselect();
         }
         let (rp, rpin) = crate::board::DISPLAY_RST;
         if self.last_levels[rp] & (1 << rpin) != 0 && now[rp] & (1 << rpin) == 0 {
@@ -702,7 +731,7 @@ impl Periphs {
             (
                 "SPI1/SPI2",
                 Partial,
-                "master transfers with FIFO, instant; MISO 0xFF without device",
+                "master transfers with FIFO, instant; MISO 0xFF with no chip selected",
             ),
             (
                 "USART1/LPUART1",
@@ -713,6 +742,16 @@ impl Periphs {
                 "RTC",
                 Partial,
                 "calendar, init mode, write protection, backup registers; no alarms/wakeup",
+            ),
+            (
+                "CC1101",
+                Stubbed,
+                "registers and strobes so the drivers start; no signal in or out",
+            ),
+            (
+                "ST25R3916",
+                Stubbed,
+                "registers so the drivers start; no field, no tag, no interrupt line",
             ),
             (
                 "IWDG",

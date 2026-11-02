@@ -724,3 +724,48 @@ Desktop with no false alarm. E2E: 50 of 50 on Chromium and WebKit, including the
 
 Demo: `cargo test --release -p dryflash-core --test crash_report -- --include-ignored`. On the page, drop a `.dfu` that faults: the E2E
 test `crash report` builds one.
+
+### Checkpoint 2 — headless runner
+
+`dryflash run` (`runner/`) drives the same wasm core under Node, in virtual time, with no throttling.
+
+- **Scripts** (BRIEF §10): `wait_for_desktop`, `press`, `long_press`, `wait`, `expect_screen` with a tolerance, `expect_no_crash`, plus
+  `expect_screen_change`, `expect_log`, `wait_for_log`, `screenshot` and `walk_menu`. Checked before anything runs. `runner/README.md` has them all.
+- **Exit codes:** 0 pass, 1 firmware failure, 2 emulator limitation, 3 usage. 1 and 2 follow the report's verdict (ADR-0016).
+- **Output:** JUnit with a test case per step, `--screenshots` with `crash.json`, `crash.md`, `crash.png` and `digest.txt`, `--report` as JSON.
+- **Default smoke test:** boot, Desktop, every main-menu entry, back out, no crash or hang. Menus differ too much to assume a shape: a list on
+  Official and Unleashed, a carousel on Momentum, a grid on RogueMaster, and on some of them Back lands on the Desktop. So it looks
+  at the screen, moving down and then right until it sees a screen it has seen.
+
+| Firmware | Result | Entries opened | Virtual | Wall |
+| --- | --- | --- | --- | --- |
+| Official 1.5.1 | pass | 10 | 32.1 s | 6.5 s |
+| Momentum mntm-012 | pass | 11 | 40.5 s | 9.0 s |
+| Unleashed 094 | pass | 12 | 37.8 s | 9.0 s |
+| RogueMaster RM1024 | pass | 15 | 54.0 s | 18.4 s |
+
+Every opened entry's screen was different on all four, and I looked at the screens of Official, Unleashed and RogueMaster. Two runs of the official
+firmware end at the same virtual time with the same final screen.
+
+**The first walk crashed the official firmware, and the report blamed the firmware.** Closing Sub-GHz failed a `furi_check` in `furi_hal_subghz_sleep`, because SPI1
+had no chips: `[FuriHalSubGhz] Init Fail`, as at every boot since M2. The report named the function at once, but its verdict was wrong, since no register gap was
+involved. Both are fixed:
+
+- **CC1101 and ST25R3916 are now stubs**, as BRIEF §5.2 always asked and ARCHITECTURE placed in M2: `board/cc1101.rs` and `board/st25r3916.rs`, from the firmware's
+  drivers. They answer so the drivers start, and there is no signal, field, tag or NFC interrupt line. At boot the log now says `Init OK` and no longer `Wrong chip id`.
+- **A stubbed chip used in the last 100 ms counts against blaming the firmware**, whenever it was first used.
+
+Sub-GHz on Official shows "Firmware update needed" and U2F shows "Certificate error". Both are the firmware's own answers to a device with no region data and no keys,
+not emulator failures. The smoke test only opens and closes these.
+
+Tests: 32 in `runner/test`, running the real command for each exit code; all Rust tests including real firmware; E2E 50 of 50 on Chromium and WebKit. CI has a new `runner`
+job with the smoke test on Official, and `deploy` waits for it.
+
+- **Not tested:** the runner on Windows; on Linux until CI runs it; Read screens in Sub-GHz or NFC, which the stubs may not carry: NFC polling in particular has no interrupt line.
+  The smoke test only proves the apps open and close.
+- **`npx dryflash` does not work yet:** the package is not on npm, and publishing is the maintainer's call. Use `node runner/bin/dryflash.mjs` after `scripts/build-wasm.sh`.
+
+Demo:
+
+    scripts/build-wasm.sh
+    node runner/bin/dryflash.mjs run firmware/cache/official/flipper-z-f7-update-1.5.1.tgz --screenshots out --junit out/junit.xml

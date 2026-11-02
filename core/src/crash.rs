@@ -366,7 +366,7 @@ fn judge(c: &Capture, state: &Snapshot, flash_raw: Option<u32>) -> (Verdict, Vec
     }
     if c.gaps.iter().any(|g| g.new) {
         basis.push(format!(
-            "Just before this it touched, for the first time in 1 s, registers the emulator has no behaviour for: {}.",
+            "Just before this it used chips or registers the emulator does not really model, not used in the second before: {}.",
             names(true)
         ));
         return (Verdict::Unclear, basis);
