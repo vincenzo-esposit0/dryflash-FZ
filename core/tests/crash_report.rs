@@ -148,6 +148,19 @@ fn the_watchdog_resets_the_system_and_is_reported() {
 }
 
 #[test]
+fn a_loop_right_after_using_a_stubbed_chip_looks_like_the_emulator() {
+    let mut m = machine(&[0xE7FE], &[]);
+    m.power_on();
+    // At this clock the machine looks every 160 ms: this is the last look before it decides.
+    assert_eq!(m.run(RESET_HZ * 51 / 10), RunExit::Budget);
+    m.bus.periphs.cc1101.transfer(0x3D);
+    assert_eq!(m.run(RESET_HZ), RunExit::Hung);
+    let r = report(&m);
+    assert_eq!(r.verdict, Verdict::EmulatorLimitation, "{:?}", r.basis);
+    assert!(r.gaps.iter().any(|g| g.block == "CC1101 (stub)"), "{:?}", r.gaps);
+}
+
+#[test]
 fn reports_are_json_and_markdown() {
     let mut m = machine(&[0xDE00], &[]);
     m.power_on();
@@ -269,6 +282,19 @@ fn thumb_b_w(from: u32, to: u32) -> [u16; 2] {
     let j1 = (!(i1 ^ s)) & 1;
     let j2 = (!(i2 ^ s)) & 1;
     [0xF000 | (s << 10) | imm10, 0x9000 | (j1 << 13) | (j2 << 11) | imm11]
+}
+
+#[test]
+#[ignore = "needs firmware/cache/official (scripts/fetch-firmware.mjs official --elf)"]
+fn the_radio_chips_start_and_their_apps_close() {
+    // Before the stubs, closing Sub-GHz crashed: furi_check in furi_hal_subghz_sleep (BRIEF §5.2).
+    let (mut m, _) = official();
+    m.power_on();
+    assert_eq!(open_menu(&mut m), RunExit::Budget);
+    let log = String::from_utf8_lossy(&m.bus.periphs.usart[0].tx).into_owned();
+    assert!(log.contains("[FuriHalSubGhz]") && log.contains("Init OK"), "{log}");
+    assert!(!log.contains("Wrong chip id"), "{log}");
+    assert!(!log.contains("Init Fail"), "{log}");
 }
 
 #[test]

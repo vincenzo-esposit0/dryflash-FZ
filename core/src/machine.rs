@@ -10,6 +10,7 @@ use crate::crash::{Capture, CrashKind, FuriRecord, InputEvent};
 use crate::loader::dfu::{Dfu, Element};
 use crate::periph::ResetKind;
 use crate::trace::digest::Digest;
+use crate::trace::digest::GapTouch;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,6 +163,8 @@ pub struct Machine {
     entry_snapshot: Option<Snapshot>,
     /// How much of the log has been searched for Furi's crash records.
     log_seen: usize,
+    /// The stubbed chips on SPI1: bytes seen so far, and the cycle counter when that last moved.
+    stubs: [(u64, u64); 2],
 }
 
 impl Default for Machine {
@@ -196,6 +199,7 @@ impl Machine {
             crash_entries: Vec::new(),
             entry_snapshot: None,
             log_seen: 0,
+            stubs: [(0, 0); 2],
         }
     }
 
@@ -337,6 +341,15 @@ impl Machine {
                 self.bus.reset_peripherals(ResetKind::Software);
                 self.reset_cpu("option bytes reload (OBL_LAUNCH)");
                 continue;
+            }
+            for (stub, accesses) in self
+                .stubs
+                .iter_mut()
+                .zip([self.bus.periphs.cc1101.accesses, self.bus.periphs.st25r3916.accesses])
+            {
+                if accesses != stub.0 {
+                    *stub = (accesses, self.cpu.cycles);
+                }
             }
             // Without a reset for it to end in, a firmware built to halt stops here.
             if let Some(record) = self.halted_record() {
@@ -566,6 +579,21 @@ impl Machine {
         let live = self.cpu.snapshot(&mut self.bus, pc, None);
         let hz = self.bus.periphs.clocks.hclk1.max(1) as u128;
         let window = (GAP_WINDOW_NS * hz / 1_000_000_000) as u64;
+        let since = self.cpu.cycles.saturating_sub(window);
+        let mut gaps = self.bus.digest.gaps_since(
+            since,
+            self.cpu.cycles.saturating_sub((GAP_NEW_NS * hz / 1_000_000_000) as u64),
+        );
+        // A stub answers so the firmware can start, not as the chip would: a suspect however long in use.
+        for (stub, name) in self.stubs.iter().zip(["CC1101 (stub)", "ST25R3916 (stub)"]) {
+            if stub.0 > 0 && stub.1 >= since {
+                gaps.push(GapTouch {
+                    block: name.to_string(),
+                    registers: Vec::new(),
+                    new: true,
+                });
+            }
+        }
         if self.captures.len() == MAX_CAPTURES {
             self.captures.remove(0);
         }
@@ -579,10 +607,7 @@ impl Machine {
             hfsr: self.cpu.sys.hfsr,
             lcd: self.display_frame(),
             inputs: self.inputs.iter().copied().collect(),
-            gaps: self.bus.digest.gaps_since(
-                self.cpu.cycles.saturating_sub(window),
-                self.cpu.cycles.saturating_sub((GAP_NEW_NS * hz / 1_000_000_000) as u64),
-            ),
+            gaps,
             unmapped: self.bus.digest.unmapped.keys().copied().collect(),
             log_tail: {
                 let tx = &self.bus.periphs.usart[0].tx;

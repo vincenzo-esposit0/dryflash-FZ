@@ -114,6 +114,47 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+  # The headless runner on the pinned firmware: the default smoke test, as a user would run it.
+  runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.lock', '**/Cargo.toml') }}
+      - name: Install wasm-bindgen CLI (same version as core-wasm/Cargo.toml)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - run: scripts/build-wasm.sh
+      - run: npm ci
+      - name: Cache pinned firmware (fetched from the original host, hash-checked)
+        uses: actions/cache@v6
+        with:
+          path: firmware/cache/official
+          key: fw-official-runner-${{ hashFiles('firmware/compat.json') }}
+      - run: node scripts/fetch-firmware.mjs official
+      - name: Smoke test
+        run: >-
+          node runner/bin/dryflash.mjs run firmware/cache/official/flipper-z-f7-update-1.5.1.tgz
+          --screenshots smoke --junit smoke/junit.xml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-official
+          path: smoke
+          retention-days: 7
+
   licences:
     runs-on: ubuntu-latest
     steps:
@@ -153,7 +194,7 @@ jobs:
   # pull requests from this repository → a preview version with alias pr-<number>.
   # Pull requests from forks get no secrets and skip this job.
   deploy:
-    needs: [rust, cpu-fuzz, web, licences, e2e]
+    needs: [rust, cpu-fuzz, web, runner, licences, e2e]
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)

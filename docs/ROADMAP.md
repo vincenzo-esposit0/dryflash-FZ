@@ -90,7 +90,8 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 
 - ☑ Full crash report (§7), symbolication via ELF, emulator-gap vs firmware-bug labelling (ADR-0016)
 - ☑ Hang detection, and the independent watchdog
-- ☐ `npx dryflash run`, YAML scripts, default smoke test, JUnit, screenshots, exit codes
+- ◐ `dryflash run`, YAML scripts, default smoke test, JUnit, screenshots, exit codes; not on npm yet, so `npx` does not find it
+- ☑ CC1101 and ST25R3916 stubs (BRIEF §5.2), which the smoke test needs
 - ☐ GitHub Action `action@v1` with PR comment
 - ☐ Nightly compatibility matrix + `/compat` page (Official, Momentum, Unleashed, RogueMaster)
 
