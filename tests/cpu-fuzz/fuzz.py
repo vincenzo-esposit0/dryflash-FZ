@@ -19,10 +19,11 @@ import sys
 from collections import Counter, defaultdict
 
 from capstone import CS_ARCH_ARM, CS_MODE_MCLASS, CS_MODE_THUMB, Cs
-from unicorn import UC_ARCH_ARM, UC_MODE_MCLASS, UC_MODE_THUMB, Uc, UcError
+from unicorn import UC_ARCH_ARM, UC_HOOK_MEM_UNMAPPED, UC_MODE_MCLASS, UC_MODE_THUMB, Uc, UcError
 from unicorn.arm_const import *
 
 FLASH, RAM, RAM_SIZE, WINDOW = 0x08000000, 0x20000000, 0x30000, 0x10000
+PPB_START, PPB_END = 0xE0000000, 0xE0100000
 cs = Cs(CS_ARCH_ARM, CS_MODE_THUMB | CS_MODE_MCLASS)
 
 
@@ -136,7 +137,17 @@ def make_uc():
     uc.mem_map(FLASH, 0x100000)
     uc.mem_write(FLASH, b"\xff" * 0x100000)  # erased flash, as in dryflash
     uc.mem_map(RAM, RAM_SIZE)
+    uc.hook_add(UC_HOOK_MEM_UNMAPPED, note_unmapped)
     return uc
+
+
+# The address of the last access Unicorn found nothing at.
+unmapped_at = [None]
+
+
+def note_unmapped(_uc, _access, address, _size, _value, _user):
+    unmapped_at[0] = address
+    return False
 
 
 def run_unicorn(uc, case):
@@ -288,6 +299,7 @@ def main():
         blob = (code >> 16).to_bytes(2, "little") + (code & 0xFFFF).to_bytes(2, "little") if code > 0xFFFF else code.to_bytes(2, "little")
         dis = next(cs.disasm(blob, FLASH), None)
         mnem = f"{dis.mnemonic} {dis.op_str}" if dis else "(capstone: invalid)"
+        unmapped_at[0] = None
         ref = run_unicorn(uc, case)
         if ref[0] == "FAULT":
             # An exception can leave Unicorn's M-profile state (handler mode, pending
@@ -295,6 +307,11 @@ def main():
             uc = make_uc()
         kind = ours.split()[0]
         mnem_code[0] = code
+        # reg_value keeps registers out of the PPB, but a sum of two can still land there. dryflash models
+        # it (read-as-zero, write-ignored, in the digest) and Unicorn does not map it: nothing to compare.
+        if kind == "OK" and ref[0] == "FAULT" and unmapped_at[0] is not None and PPB_START <= unmapped_at[0] < PPB_END:
+            stats["known: access to the PPB, which Unicorn does not map"] += 1
+            continue
         known = known_divergence(ours, ref, mnem)
         if known:
             stats["known: " + known] += 1
