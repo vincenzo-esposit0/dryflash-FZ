@@ -46,8 +46,9 @@ fn furi_crash_record_is_decoded_and_boot_loop_detected() {
     )
     .unwrap();
     m.power_on();
-    let exit = m.run(10_000_000);
-    assert_eq!(exit, RunExit::BootLoop { resets: 5 });
+    // The first reset is a crash: the run stops there, and carrying on finds the loop.
+    assert_eq!(m.run(10_000_000), RunExit::Crashed);
+    assert_eq!(m.run(10_000_000), RunExit::BootLoop { resets: 5 });
     assert_eq!(m.crashes.len(), 1, "the same record is reported once");
     assert_eq!(m.crashes[0].message.as_deref(), Some("furi_check failed"));
 }

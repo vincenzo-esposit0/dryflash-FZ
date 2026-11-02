@@ -145,5 +145,19 @@
   "installMode": "Come installare i pacchetti",
   "quickMode": "Installazione rapida",
   "quickNote": "Installazione rapida: il firmware va direttamente in flash e le risorse sulla scheda.",
-  "backupNote": "Un solo file con firmware, scheda e impostazioni di questo dispositivo. Importandolo si crea un dispositivo nuovo."
+  "backupNote": "Un solo file con firmware, scheda e impostazioni di questo dispositivo. Importandolo si crea un dispositivo nuovo.",
+  "verdict_firmware": "Sembra un bug del firmware",
+  "verdict_emulator": "Sembra un limite dell'emulatore",
+  "verdict_unclear": "Può essere sia un bug del firmware sia un limite dell'emulatore",
+  "verdictNote": "È una valutazione basata su ciò che ha visto l'emulatore, non una prova: si fonda sui motivi elencati sopra. Riprendi continua come farebbe il dispositivo: dopo un crash Furi si riavvia.",
+  "downloadJson": "Scarica JSON",
+  "downloadMarkdown": "Scarica Markdown",
+  "downloadPng": "Scarica lo schermo (PNG)",
+  "furiRecord": "Il record del firmware",
+  "backtrace": "Backtrace",
+  "backtraceNote": "Trovato cercando nello stack gli indirizzi di ritorno, quindi può contenere frame vecchi. I nomi richiedono l'ELF del firmware.",
+  "registers": "Registri",
+  "recentPcs": "Ultime 64 istruzioni",
+  "gaps": "Registri senza comportamento, toccati negli ultimi 100 ms",
+  "noGaps": "Nessuno."
 }

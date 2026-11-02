@@ -91,6 +91,11 @@ fn within(addr: u32, size: Size, base: u32, len: u32) -> Option<usize> {
 }
 
 impl SystemBus {
+    /// Sleep Method = Legacy right now, as the firmware's settings have it (ADR-0012).
+    pub fn legacy_sleep_on(&self) -> bool {
+        self.periphs.rtc.backup(1) & SYS_FLAG_LEGACY_SLEEP != 0
+    }
+
     pub fn new() -> Self {
         let mut engi = vec![0xFF; ENGI_SIZE as usize];
         let fs = (FLASHSIZE_ADDR - ENGI_BASE) as usize;

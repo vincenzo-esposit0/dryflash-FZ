@@ -145,5 +145,19 @@
   "installMode": "How packages are installed",
   "quickMode": "Quick install",
   "quickNote": "Quick install: the firmware goes straight into flash and the resources onto the card.",
-  "backupNote": "One file with this device's firmware, card and settings. Importing it creates a new device."
+  "backupNote": "One file with this device's firmware, card and settings. Importing it creates a new device.",
+  "verdict_firmware": "Looks like a firmware bug",
+  "verdict_emulator": "Looks like an emulator limitation",
+  "verdict_unclear": "Could be either a firmware bug or an emulator limitation",
+  "verdictNote": "This is a judgement from what the emulator saw, not a proof. The reasons above are what it rests on. Resume continues as the device would: Furi reboots after a crash.",
+  "downloadJson": "Download JSON",
+  "downloadMarkdown": "Download Markdown",
+  "downloadPng": "Download screen (PNG)",
+  "furiRecord": "The firmware's record",
+  "backtrace": "Backtrace",
+  "backtraceNote": "Found by scanning the stack for return addresses, so it can include stale frames. Names need the firmware's ELF.",
+  "registers": "Registers",
+  "recentPcs": "Last 64 instructions",
+  "gaps": "Registers with no behaviour, touched in the last 100 ms",
+  "noGaps": "None."
 }

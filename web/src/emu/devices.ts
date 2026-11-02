@@ -31,6 +31,9 @@ export interface DeviceMeta {
   uid: string;
   /** What was last installed, for display. */
   firmware: string | null;
+  /** For crash reports: the package's version, and the hash of the file that was installed. */
+  firmwareVersion?: string | null;
+  firmwareSha256?: string | null;
 }
 
 export type Blob = "flash" | "ob";

@@ -85,6 +85,33 @@ pub enum Stop {
     Watch { pc: u32 },
 }
 
+/// Length of the ring of executed PCs (BRIEF §7).
+pub const PC_RING: usize = 64;
+/// Stack words kept with a snapshot, for the crash report's backtrace.
+const SNAPSHOT_STACK_WORDS: u32 = 256;
+
+/// The processor's state at one moment, for a crash report.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub cycles: u64,
+    /// R0–R15, with R13 the active stack pointer and R15 the instruction's own address.
+    pub r: [u32; 16],
+    pub xpsr: u32,
+    pub msp: u32,
+    pub psp: u32,
+    pub control: u32,
+    pub cfsr: u32,
+    pub hfsr: u32,
+    pub mmfar: u32,
+    pub bfar: u32,
+    /// What raised it, if it was a fault.
+    pub fault: Option<Fault>,
+    /// Executed PCs, oldest first.
+    pub recent_pcs: Vec<u32>,
+    /// Words from the stack pointer upwards.
+    pub stack: Vec<u32>,
+}
+
 /// Synchronous fault causes (DDI 0403E B1.5.14, CFSR bits).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
@@ -185,6 +212,10 @@ pub struct Cpu {
     /// PC watchpoints, sorted.
     pub watch: Vec<u32>,
     pub events: Vec<CpuEvent>,
+    /// The first fault since this was last cleared, as it was before the exception was taken.
+    pub first_fault: Option<Snapshot>,
+    pc_ring: [u32; PC_RING],
+    pc_count: usize,
 
     branched: bool,
     /// Re-evaluate pending exceptions before the next instruction.
@@ -240,6 +271,9 @@ impl Cpu {
             events: Vec::new(),
             branched: false,
             exc_check: true,
+            first_fault: None,
+            pc_ring: [0; PC_RING],
+            pc_count: 0,
             cur_pc: 0,
             exec_lo: 0,
             exec_hi: 0,
@@ -331,6 +365,55 @@ impl Cpu {
         self.c = (v >> 29) & 1 != 0;
         self.v = (v >> 28) & 1 != 0;
         self.q = (v >> 27) & 1 != 0;
+    }
+
+    /// Executed PCs still in the ring, oldest first.
+    pub fn recent_pcs(&self) -> Vec<u32> {
+        let n = self.pc_count.min(PC_RING);
+        (self.pc_count - n..self.pc_count)
+            .map(|i| self.pc_ring[i % PC_RING])
+            .collect()
+    }
+
+    /// The state now, with `pc` as the instruction it is about.
+    pub fn snapshot<B: Bus>(&self, bus: &mut B, pc: u32, fault: Option<Fault>) -> Snapshot {
+        let mut r = self.r;
+        r[15] = pc;
+        let mut stack = Vec::new();
+        for i in 0..SNAPSHOT_STACK_WORDS {
+            let addr = r[13].wrapping_add(i * 4);
+            // RAM only: a read elsewhere could have side effects, and this is not the firmware reading.
+            if !(0x2000_0000..0x2004_0000).contains(&addr) {
+                break;
+            }
+            match bus.read(addr, Size::Word) {
+                Ok(w) => stack.push(w),
+                Err(_) => break,
+            }
+        }
+        Snapshot {
+            cycles: self.cycles,
+            r,
+            xpsr: self.xpsr(),
+            msp: if self.control & 2 == 0 || self.ipsr != 0 {
+                r[13]
+            } else {
+                self.msp
+            },
+            psp: if self.control & 2 != 0 && self.ipsr == 0 {
+                r[13]
+            } else {
+                self.psp
+            },
+            control: self.control,
+            cfsr: self.sys.cfsr,
+            hfsr: self.sys.hfsr,
+            mmfar: self.sys.mmfar,
+            bfar: self.sys.bfar,
+            fault,
+            recent_pcs: self.recent_pcs(),
+            stack,
+        }
     }
 
     /// Full xPSR as stacked on exception entry: APSR | IPSR | EPSR (T, IT).
@@ -461,6 +544,8 @@ impl Cpu {
             Err(_) => return self.fault_at(bus, Fault::BusFetch, pc),
         };
         self.cur_pc = pc;
+        self.pc_ring[self.pc_count % PC_RING] = pc;
+        self.pc_count = self.pc_count.wrapping_add(1);
         self.r[15] = pc.wrapping_add(4);
         self.branched = false;
         let it_before = self.it;
