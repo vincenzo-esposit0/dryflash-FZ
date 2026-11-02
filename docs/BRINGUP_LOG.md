@@ -793,3 +793,17 @@ Tests: the action's real script against a fake GitHub API for pass, hang, a read
 
 The body now follows the device's Color setting at once: white, black or transparent (ADR-0015, addendum), and it stays after a reload. New devices start white. The firmware still reads the colour from OTP at the next power-on,
 as before. The board seen through the transparent body is decoration. E2E: the setting changes the drawing and survives a reload, on Chromium and WebKit. Checked by eye at desktop and phone widths.
+
+### The `RangeError`, explained
+
+It came back on production, and this time the worker's forwarded exception gave a stack: `new Uint8Array` in `SlotStore.load`, the page stuck on "Loading" with the error shown. 144115188075855870 is how
+JavaScript prints 2^57, which is what `load` computes if `getSize()` on `sd.dat` returns 2^64: an unsigned -1. So OPFS reported an impossible size for a moment; the next load was fine, with the same files. It happened
+on a first load in a tab, which fits every sighting. Why Chromium returns that is not known, and it has not been reproduced on demand.
+
+`SlotStore` now refuses an impossible size, so `openCardRetrying` tries again as it does for a held lock, and after 3 s the device runs unsaved and the page says so. The saved card is never touched. The unit test covers the refusal; the
+whole path has only been reasoned through, since the browser's behaviour cannot be provoked. The earlier notes blaming a stale `.js`/`.wasm` pair were wrong.
+
+### M5 closed
+
+The Firmware Hub (https://vincenzo-esposit0.github.io/flipper-zero-firmware-hub/) links "Prova nell'emulatore" to the emulator's home page, which opens, and that closes M5's last item. It does not pass a firmware with `?fw=`, so the visitor still has to
+provide one.

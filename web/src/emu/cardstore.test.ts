@@ -79,4 +79,11 @@ describe("SlotStore", () => {
     await s.clear();
     expect((await new SlotStore(idx, dat).load()).length).toBe(0);
   });
+
+  it.each([2 ** 64, -1, Number.NaN])("refuses a file that reports a size of %s, so that opening it is retried", (size) => {
+    const bad = new MemFile();
+    bad.getSize = () => size;
+    expect(() => new SlotStore(bad, new MemFile())).toThrow(/size/);
+    expect(() => new SlotStore(new MemFile(), bad)).toThrow(/size/);
+  });
 });
