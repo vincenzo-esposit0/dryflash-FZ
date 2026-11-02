@@ -4,6 +4,8 @@
 
 export const BLOCK = 512;
 export const RECORD = 4 + BLOCK;
+/** More than any card here can hold. */
+const MAX_FILE_BYTES = 2 ** 40;
 
 export type Persistence = "opfs" | "indexeddb" | "none";
 
@@ -37,7 +39,14 @@ export class SlotStore implements CardStore {
   constructor(
     private idx: RandomAccess,
     private dat: RandomAccess,
-  ) {}
+  ) {
+    // Seen in Chromium for a moment around a page's start: getSize() returning 2^64, an unsigned -1. Taken at its word it
+    // makes an impossible allocation and the page never starts. Refusing lets openCardRetrying try again, like a held lock.
+    for (const f of [idx, dat]) {
+      const size = f.getSize();
+      if (!(size >= 0 && size <= MAX_FILE_BYTES)) throw new Error(`the card's file reports a size of ${size}`);
+    }
+  }
 
   async load(): Promise<Uint8Array> {
     const n = Math.min(Math.floor(this.idx.getSize() / 4), Math.floor(this.dat.getSize() / BLOCK));

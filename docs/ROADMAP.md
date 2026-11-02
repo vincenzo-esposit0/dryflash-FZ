@@ -82,7 +82,7 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 - ☑ Pixel-art device modelled on the real one, tabs modelled on qFlipper's use (ADR-0015)
 - ☑ i18n (en, it), accessibility pass (axe: WCAG A and AA), keyboard use
 - ☑ E2E suite on Chromium, Firefox and WebKit (`tests/e2e`)
-- ◐ Firmware Hub's "Try in emulator" link: this side is ready; the link belongs to the Hub, in the maintainer's hands
+- ☑ Firmware Hub's "Try in emulator" link, to the emulator's home page; a link per firmware with `?fw=` is possible later
 
 **DoD:** E2E suite green on Chrome/Firefox/WebKit; Hub "Try in emulator" link works.
 
