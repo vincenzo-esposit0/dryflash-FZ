@@ -22,7 +22,7 @@ Working rules — follow them for the whole project:
 
 ## 1. Product vision
 
-**Name:** **dryflash** (always lowercase in code, CLI and npm package). GitHub repository: `dryflash-FZ`. The name comes from "dry run" + "flash": try a firmware *before* you flash it.
+**Name:** **dryflash** (always lowercase in code and CLI). GitHub repository: `dryflash-FZ`. The name comes from "dry run" + "flash": try a firmware *before* you flash it.
 Never brand the product as "Flipper …" (trademark of Flipper Devices Inc.). Use nominative wording only: "dryflash — an emulator for Flipper Zero firmware". GitHub topics: `flipper-zero`, `emulator`, `stm32`, `stm32wb55`, `webassembly`, `rust`, `firmware`.
 
 **One-liner:** "Try any Flipper Zero firmware in your browser before flashing it to your real device."
@@ -211,7 +211,7 @@ Detect and report, with timestamps in virtual time:
 
 ## 10. Headless runner and CI integration (adoption driver for developers)
 
-- `npx dryflash run <firmware.tgz|.dfu> [--elf f.elf] [--script smoke.yaml] [--timeout 60] [--junit out.xml] [--screenshots dir/]`
+- `dryflash run <firmware.tgz|.dfu> [--elf f.elf] [--script smoke.yaml] [--timeout 60] [--junit out.xml] [--screenshots dir/]`
 - Input script format (YAML): steps like `wait_for_desktop`, `press: [down, ok]`, `long_press: back`, `wait: 2s`, `expect_screen: golden.png` (pixel-exact or tolerance), `expect_no_crash`.
 - Built-in **default smoke test**: boot → reach Desktop → open main menu → open each top-level app category → back out → no crash/hang.
 - Exit codes: 0 pass, 1 firmware failure, 2 emulator limitation hit, 3 usage error.

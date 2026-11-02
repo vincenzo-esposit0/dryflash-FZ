@@ -4,6 +4,17 @@
 Smoke-tests a Flipper Zero firmware build with no hardware, by running the real binary in the dryflash emulator.
 It is a smoke test, not a hardware certification: passing here does not guarantee it works on a device.
 
+Not affiliated with or endorsed by Flipper Devices Inc. Flipper Zero is a trademark of its respective owner. Licensed under GPL-3.0-or-later;
+source at https://github.com/vincenzo-esposit0/dryflash-FZ. For CI, there is [a GitHub Action](https://github.com/vincenzo-esposit0/dryflash-FZ/tree/main/action).
+
+The runner is released as a file on GitHub, not on npm. With Node 20 or later, this fetches it and runs it:
+
+```bash
+npx --yes --package=https://github.com/vincenzo-esposit0/dryflash-FZ/releases/download/v0.1.0/dryflash-0.1.0.tgz dryflash run <firmware.tgz|.dfu>
+```
+
+The full command, here shortened to `dryflash`:
+
 ```bash
 dryflash run <firmware.tgz|.dfu> [--elf f.elf] [--script smoke.yaml] [--timeout 300] [--junit out.xml] [--screenshots dir/] [--report out.json] [--update-goldens]
 ```

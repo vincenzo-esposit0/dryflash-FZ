@@ -117,6 +117,9 @@ jobs:
   # The headless runner on the pinned firmware: the default smoke test, as a user would run it.
   runner:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # the action comments on our own pull requests too
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -154,6 +157,28 @@ jobs:
           name: smoke-official
           path: smoke
           retention-days: 7
+      # The action as a user gets it, except that the runner is this commit's package, not the published one.
+      - name: Pack the runner
+        working-directory: runner
+        run: npm pack --pack-destination "$RUNNER_TEMP"
+      - name: Find the package
+        id: pack
+        run: echo "file=$(ls "$RUNNER_TEMP"/dryflash-*.tgz)" >> "$GITHUB_OUTPUT"
+      - id: action
+        uses: ./action
+        with:
+          firmware: firmware/cache/official/flipper-z-f7-update-1.5.1.tgz
+          package: ${{ steps.pack.outputs.file }}
+          artifact-name: action-official
+      - name: The action reports the pass
+        env:
+          RESULT: ${{ steps.action.outputs.result }}
+          EXIT_CODE: ${{ steps.action.outputs.exit-code }}
+          JUNIT: ${{ steps.action.outputs.junit }}
+        run: |
+          test "$RESULT" = pass
+          test "$EXIT_CODE" = 0
+          grep -q 'failures="0"' "$JUNIT"
 
   licences:
     runs-on: ubuntu-latest
