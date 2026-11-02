@@ -769,3 +769,7 @@ Demo:
 
     scripts/build-wasm.sh
     node runner/bin/dryflash.mjs run firmware/cache/official/flipper-z-f7-update-1.5.1.tgz --screenshots out --junit out/junit.xml
+
+The merge's run on main failed in `cpu-fuzz`, seed 25, so `deploy` was skipped: `strh r4, [r0, r2]` with an address of 0xE002C629. Each register was random and outside the
+PPB, which the generator avoids, but their sum was inside it. dryflash models the PPB and this Unicorn harness maps nothing there, so there was nothing to compare, and the CPU was
+not at fault. The fuzzer now counts that as a known case, from the address Unicorn reports. Re-running would not have helped: the seed is the run number, and a re-run keeps it.
