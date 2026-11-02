@@ -11,7 +11,7 @@ import { WalkFailure, walkMenu } from "./walk.mjs";
 export const EXIT = { pass: 0, firmware: 1, emulator: 2, usage: 3 };
 
 /** The firmware's own signs that it has reached the Desktop (AnimationManager picks the idle animation). */
-const atDesktop = (log) => log.includes("[AnimationManager]") && /Select '/.test(log);
+export const atDesktop = (log) => log.includes("[AnimationManager]") && /Select '/.test(log);
 /** With no factory keys (ADR-0012) Desktop opens with this popup, and Back closes it. */
 const POPUP_LOG = "Secure Enclave verification failed";
 const DESKTOP_TIMEOUT_MS = 60_000;
@@ -90,6 +90,7 @@ export function run(o) {
   session.drainLog();
   out.virtualMs = session.virtualMs;
   out.logTail = session.log.slice(-4096);
+  out.fullLog = session.log;
   out.digest = session.digest();
   out.screen ??= toBraille(session.frame());
   if (o.screenshots) {

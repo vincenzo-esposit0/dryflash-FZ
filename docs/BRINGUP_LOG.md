@@ -815,3 +815,23 @@ official firmware fetched from its host and hash-checked. One job passed and com
 meets the first half of M6's definition of done. BRIEF §10 now has the screen as text in the comment, the maintainer's decision.
 
 - **Not tested:** a pull request from a fork; a real firmware crash through the action.
+
+### Checkpoint 4 — nightly matrix and generated `/compat`
+
+`scripts/compat-matrix.mjs` runs each pinned firmware and each one's latest release, when newer: the default smoke test, then a real OTA. `firmware/compat-results.json` is now its output, and `/compat` shows it, with a failed result as "No" and its reason, a separate
+row for a newer release, and what the columns do and do not mean. `.github/workflows/nightly.yml` runs it at 03:17 UTC and publishes changes to main (ADR-0017).
+
+| Firmware | Boots | Desktop | Menu entries | Real OTA, from another firmware |
+| --- | --- | --- | --- | --- |
+| Official 1.5.1 | yes | yes | 10 | yes |
+| Momentum mntm-012 | yes | yes | 11 | yes |
+| Unleashed 094 | yes | yes | 12 | yes |
+| RogueMaster RM1024 | yes | yes | 15 | yes |
+
+All four, run here in about 10 minutes. No release newer than the pinned one exists today, so the latest-release path has only been tested for its parts. This is the first time Real OTA has run for Momentum and RogueMaster, which M4 left untested.
+
+- **The first OTA check was wrong twice.** It waited for "Restoring '/int'" in the log and reported three failures, while the screens showed the Desktop back. After writing flash, the updaters of Momentum, Unleashed and RogueMaster, and the firmware they restart, print nothing on
+  USART1. Why is not known. Then it had each firmware update itself, which proves little since flash already held those bytes. It now updates from a different firmware and measures: flash does not hold the package before, holds it byte for byte after (`package_installed`), three resets, and that
+  firmware's own first screen back.
+- **The silent log is a real limit.** With no log after an OTA on those three, a crash there is found through Furi's fault register and the hang detector only, without the firmware's own record.
+- **Not tested:** `nightly.yml` itself, which can only run on main; a failed result on the page beyond the unit tests; resources after an update on these three, which only `core/tests/ota_official.rs` compares, for Official.

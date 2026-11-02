@@ -118,7 +118,7 @@
   "viaProxy": "{name} loaded from {url}, through the dryflash proxy.",
   "direct": "{name} loaded from {url}.",
   "compatTitle": "Compatibility",
-  "compatIntro": "The pinned firmwares and what has been seen working on each, checked by hand on {date}. A nightly automatic run replaces this in a later milestone.",
+  "compatIntro": "The pinned firmwares and each one's latest release, as the nightly CI saw them in this emulator. Last written on {date}; it changes when a result does, and at least weekly.",
   "firmware": "Firmware",
   "version": "Version",
   "licence": "Licence",
@@ -159,5 +159,8 @@
   "registers": "Registers",
   "recentPcs": "Last 64 instructions",
   "gaps": "Registers with no behaviour, touched in the last 100 ms",
-  "noGaps": "None."
+  "noGaps": "None.",
+  "no": "No",
+  "latestRelease": "Latest release",
+  "compatLimits": "\"Launches apps\" means every main-menu entry opened and closed, with how many. \"Real OTA\" means the firmware's own updater replaced a different firmware, and flash then held its package byte for byte; the radio stack is left out (ADR-0014). None of this says a firmware works on a device."
 }

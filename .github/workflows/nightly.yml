@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The compatibility matrix (BRIEF §10): the pinned firmwares and each one's latest release in the emulator. What it saw goes
+# to firmware/compat-results.json, and from there to /compat. The file is written only when a result changes, or a week on.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the results file, and nothing else
+      actions: write # to start the CI that deploys it
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: wasm-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', '**/Cargo.lock', '**/Cargo.toml') }}
+      - name: Install wasm-bindgen CLI (same version as core-wasm/Cargo.toml)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.130
+      - run: scripts/build-wasm.sh
+      - run: npm ci
+      - name: Cache pinned firmware (fetched from the original host, hash-checked)
+        uses: actions/cache@v6
+        with:
+          path: firmware/cache
+          key: fw-all-${{ hashFiles('firmware/compat.json') }}
+      - name: Run the matrix
+        id: matrix
+        # The results are published when a firmware fails too: that is what the page is for.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/compat-matrix.mjs
+      - name: Publish the results if they changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git add firmware/compat-results.json
+          if git diff --cached --quiet; then
+            echo "Nothing changed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Compatibility results of $(date -u +%F)"
+          git push
+          gh workflow run ci.yml --ref main
+      - name: A pinned firmware that fails is a failed run
+        if: steps.matrix.outcome == 'failure'
+        run: exit 1

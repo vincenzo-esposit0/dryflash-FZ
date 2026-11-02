@@ -177,6 +177,16 @@ impl Emulator {
         ))
     }
 
+    /// Whether flash holds this package's firmware, byte for byte.
+    pub fn package_installed(&self, bytes: &[u8]) -> Result<bool, String> {
+        let pkg = Package::parse(bytes).map_err(|e| e.to_string())?;
+        let image = dfu::parse(pkg.firmware()).map_err(|e| format!("firmware in the package: {e}"))?;
+        Ok(image.targets.iter().flat_map(|t| &t.elements).all(|e| {
+            let at = e.address.wrapping_sub(0x0800_0000) as usize;
+            self.m.bus.flash.get(at..at + e.data.len()) == Some(&e.data[..])
+        }))
+    }
+
     /// Real OTA: stages a package on the card without its radio stack (ADR-0014) and restarts into
     /// the running firmware's own updater. Returns `{"info", "path"}` as JSON, or an error message.
     pub fn start_ota(&mut self, bytes: &[u8]) -> Result<String, String> {
