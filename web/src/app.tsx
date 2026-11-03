@@ -12,19 +12,18 @@ import type {
   Status,
   ToWorker,
 } from "./emu/protocol";
-import { detectLocale, t, type Key } from "./i18n";
+import { tr, type Key } from "./i18n";
 import { LINK_DEVICE, fetchFirmware, linkMustAsk, parseLink, type LinkParams } from "./emu/remote";
 import { stripAnsi } from "./ui/ansi";
 import { download, formatSize, joinPath, parentPath } from "./ui/download";
 import { encodeGif, type GifFrame } from "./ui/gif";
 import { buttonForKey } from "./ui/keys";
 import { Fidelity } from "./pages";
-import { SiteFooter, SiteHeader } from "./ui/chrome";
-import { ART_STEP, artSize, drawView, fitView, type Skin, skinForColour, toRgba, type View } from "./ui/shell";
+import { Prompt, SiteFooter, SiteHeader } from "./ui/chrome";
+import { Picker } from "./ui/picker";
+import { ART_STEP, artSize, drawView, fitView, fitWorkspace, type Skin, skinForColour, toRgba, type View } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 
-const locale = detectLocale(navigator.languages ?? [navigator.language]);
-const tr = (k: Key) => t(locale, k);
 const LOG_LIMIT = 64 * 1024;
 const EVENT_LIMIT = 200;
 /** Screenshots and videos: 4× the panel (BRIEF §9). */
@@ -82,6 +81,13 @@ function AskDialog({ question, close }: { question: Question | null; close: () =
   );
 }
 
+/** A message kept in the page: it follows the language if that changes while it is up. */
+interface Notice {
+  key: Key;
+  vars: Record<string, string>;
+}
+const noticeText = (n: Notice) => Object.entries(n.vars).reduce((text, [k, v]) => text.replace(`{${k}}`, v), tr(n.key));
+
 interface Stop {
   reason: string;
   crashes: CrashRecord[];
@@ -107,6 +113,7 @@ function CrashPanel({ stop }: { stop: Stop }) {
         ))}
       </ul>
       <p class="hint">{tr("verdictNote")}</p>
+      {tr("coreEnglish") && <p class="hint">{tr("coreEnglish")}</p>}
       <div class="toolbar">
         <button onClick={() => download(`${file}.json`, JSON.stringify(r, null, 2), "application/json")}>
           {tr("downloadJson")}
@@ -121,6 +128,8 @@ function CrashPanel({ stop }: { stop: Stop }) {
           {tr("furiRecord")}: {r.furi.task ?? "?"} — {r.furi.message}
         </p>
       )}
+      <details>
+        <summary>{tr("technicalDetails")}</summary>
       <h3>{tr("backtrace")}</h3>
       <p class="hint">{tr("backtraceNote")}</p>
       <ul class="crashes frames">
@@ -162,6 +171,7 @@ function CrashPanel({ stop }: { stop: Stop }) {
             ))}
           </ul>
         )}
+      </details>
       </details>
     </div>
   );
@@ -254,7 +264,7 @@ function DeviceView({
 function DeviceSettings({ device, send }: { device: DeviceMeta; send: Send }) {
   const board = device.board;
   const battery = device.battery;
-  const options = (prefix: "region" | "color", values: number[]) =>
+  const options = (prefix: "region", values: number[]) =>
     values.map((v) => <option value={v}>{tr(`${prefix}${v}` as Key)}</option>);
   const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
   const checked = (e: Event) => (e.currentTarget as HTMLInputElement).checked;
@@ -283,12 +293,6 @@ function DeviceSettings({ device, send }: { device: DeviceMeta; send: Send }) {
           </select>
         </label>
         <label>
-          {tr("color")}{" "}
-          <select value={board.color} onChange={(e) => send({ type: "settings", board: { ...board, color: +value(e) } })}>
-            {options("color", [1, 2, 3])}
-          </select>
-        </label>
-        <label>
           <input type="checkbox" checked={device.legacySleep} onChange={(e) => send({ type: "settings", legacySleep: checked(e) })} />{" "}
           {tr("legacySleep")}
         </label>
@@ -314,6 +318,27 @@ function DeviceSettings({ device, send }: { device: DeviceMeta; send: Send }) {
         <p class="hint">{tr("applyNext")}</p>
       </div>
     </details>
+  );
+}
+
+/** The colour the firmware reads from OTP, which is also the colour of the drawn body (ADR-0015). */
+function SkinChoice({ device, send }: { device: DeviceMeta | null; send: Send }) {
+  return (
+    <fieldset class="skins" disabled={!device}>
+      <legend>{tr("color")}</legend>
+      {[1, 2, 3].map((c) => (
+        <label class="skin">
+          <input
+            type="radio"
+            name="skin"
+            checked={device?.board.color === c}
+            onChange={() => device && send({ type: "settings", board: { ...device.board, color: c } })}
+          />
+          <span class={`swatch c${c}`} aria-hidden="true" />
+          {tr(`color${c}` as Key)}
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
@@ -598,7 +623,7 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [cardCapacity, setCardCapacity] = useState(0);
   const [cardUsed, setCardUsed] = useState(0);
   const [listing, setListing] = useState<{ path: string; entries: CardEntry[] | null }>({ path: "/", entries: null });
-  const [installed, setInstalled] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<Notice | null>(null);
   const [ota, setOta] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [leds, setLeds] = useState<[number, number, number, number]>([0, 0, 0, 0]);
@@ -611,8 +636,15 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [ghosting, setGhosting] = useState(false);
   const [recording, setRecording] = useState<"webm" | "gif" | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
-  const [fetching, setFetching] = useState<string | null>(null);
-  const [provenance, setProvenance] = useState<string | null>(null);
+  const [fetching, setFetching] = useState<{ text: string; percent: number | null } | null>(null);
+  // Between handing a firmware over and its first pixels. The first pixels are the only signal every firmware gives.
+  const [phase, setPhaseState] = useState<"installing" | "booting" | null>(null);
+  const phaseRef = useRef<"installing" | "booting" | null>(null);
+  const setPhase = (p: "installing" | "booting" | null) => {
+    phaseRef.current = p;
+    setPhaseState(p);
+  };
+  const [provenance, setProvenance] = useState<Notice | null>(null);
   const [dragging, setDragging] = useState(false);
   const [tab, setTab] = useState<Tab>("device");
   const [view, setView] = useState<View>(() => fitView(window.innerWidth - 48));
@@ -630,10 +662,14 @@ export function App({ embed = false }: { embed?: boolean }) {
     try {
       const f = await fetchFirmware(link.fw, location.href, (done, total) => {
         const percent = total ? `${Math.round((done * 100) / total)}%` : formatSize(done);
-        setFetching(tr("downloading").replace("{name}", link.fw.split("/").pop() ?? "").replace("{percent}", percent));
+        setFetching({
+          text: tr("downloading").replace("{name}", link.fw.split("/").pop() ?? "").replace("{percent}", percent),
+          percent: total ? Math.round((done * 100) / total) : null,
+        });
       });
       setFetching(null);
-      setProvenance(tr(f.viaProxy ? "viaProxy" : "direct").replace("{name}", f.name).replace("{url}", link.fw));
+      setProvenance({ key: f.viaProxy ? "viaProxy" : "direct", vars: { name: f.name, url: link.fw } });
+      setPhase("installing");
       send({ type: "load", name: f.name, bytes: f.bytes, ota: link.ota, deviceLabel }, [f.bytes]);
       if (link.elf) {
         const e = await fetchFirmware(link.elf, location.href);
@@ -743,24 +779,23 @@ export function App({ embed = false }: { embed?: boolean }) {
           break;
         case "loaded":
           setFirmware(m.name);
-          setInstalled(
-            m.packageInfo
-              ? tr("installed").replace("{files}", String(m.packageInfo.files)).replace("{info}", m.packageInfo.info)
-              : null,
-          );
+          setInstalled(m.packageInfo ? { key: "installed", vars: { files: String(m.packageInfo.files), info: m.packageInfo.info } } : null);
           setLog("");
           setEvents([]);
           setStop(null);
           setError(null);
+          setPhase("booting");
           break;
         case "otaStarted":
           setFirmware(m.name);
           setStop(null);
           setError(null);
-          setInstalled(tr("otaStarted").replace("{name}", m.name).replace("{info}", m.info));
+          setPhase(null);
+          setInstalled({ key: "otaStarted", vars: { name: m.name, info: m.info } });
           break;
         case "frame":
           bits.current = new Uint8Array(m.bits);
+          if (phaseRef.current === "booting" && bits.current.some((b) => b !== 0)) setPhase(null);
           onFrame();
           if (framesOut.current.on && performance.now() - framesOut.current.last >= 200) {
             framesOut.current.last = performance.now();
@@ -792,6 +827,7 @@ export function App({ embed = false }: { embed?: boolean }) {
           setStatus(m.status);
           break;
         case "stopped":
+          setPhase(null);
           setStop({
             reason: m.reason,
             crashes: m.crashes,
@@ -803,11 +839,13 @@ export function App({ embed = false }: { embed?: boolean }) {
           toParent({ type: "crashed", summary: m.crashes[m.crashes.length - 1]?.message ?? m.reason });
           break;
         case "error":
+          setPhase(null);
           setError(m.message);
           toParent({ type: "error", message: m.message });
           break;
         case "uncaught":
           console.error("dryflash worker:", m.stack ?? m.message);
+          setPhase(null);
           setError(m.message);
           toParent({ type: "error", message: m.message });
           break;
@@ -921,15 +959,17 @@ export function App({ embed = false }: { embed?: boolean }) {
     if (!el) return;
     const update = () => {
       const full = document.fullscreenElement === deviceBox.current;
-      const next = full ? fitView(window.innerWidth, window.innerHeight, 12) : fitView(el.clientWidth - 16);
+      const next = full ? fitView(window.innerWidth, window.innerHeight, 12) : fitWorkspace(el.clientWidth - 16, window.innerWidth, window.innerHeight);
       // Only a real change: resizing the device resizes this element, which would observe itself.
       setView((v) => (v.scale === next.scale && v.model.width === next.model.width ? v : next));
     };
     const ro = new ResizeObserver(() => requestAnimationFrame(update));
     ro.observe(el);
+    window.addEventListener("resize", update);
     document.addEventListener("fullscreenchange", update);
     return () => {
       ro.disconnect();
+      window.removeEventListener("resize", update);
       document.removeEventListener("fullscreenchange", update);
     };
   }, []);
@@ -954,6 +994,8 @@ export function App({ embed = false }: { embed?: boolean }) {
         return buttonForKey(e.key);
       }
       if (document.querySelector("dialog[open]")) return null;
+      // A scrolling region keeps its arrow keys, as other controls keep theirs.
+      if (el instanceof HTMLElement && el.classList.contains("scroll")) return null;
       if (
         el instanceof HTMLInputElement ||
         el instanceof HTMLSelectElement ||
@@ -988,6 +1030,7 @@ export function App({ embed = false }: { embed?: boolean }) {
   const load = async (file: File) => {
     setError(null);
     const bytes = await file.arrayBuffer();
+    setPhase("installing");
     send({ type: "load", name: file.name, bytes, ota: otaRef.current }, [bytes]);
   };
 
@@ -1065,100 +1108,72 @@ export function App({ embed = false }: { embed?: boolean }) {
     .replace("{total}", (cardCapacity / 1e6).toFixed(0))} ${tr(`persist_${persistence}` as Key)}`;
   const hasFirmware = !!firmware;
 
+  const pick = (url: string) => {
+    setError(null);
+    void loadFromUrl({ fw: url, elf: null, ota: otaRef.current });
+  };
+  const busy = !!fetching || !!phase;
+  const deviceStage = (
+    <section class="stage" ref={stage} aria-label={tr("device")}>
+      <DeviceView
+        view={view}
+        skin={skinForColour(active?.board.color ?? 2)}
+        canvas={canvas}
+        leds={leds}
+        pressed={pressed}
+        press={press}
+        enabled={hasFirmware}
+        box={deviceBox}
+      />
+      {!embed && <SkinChoice device={active} send={send} />}
+      {fetching && (
+        <div class="progress" role="status">
+          {fetching.text}
+          {fetching.percent !== null && <progress max={100} value={fetching.percent} aria-hidden="true" />}
+        </div>
+      )}
+      {!fetching && phase && (
+        <div class="progress" role="status">
+          {tr(phase)}
+          <progress aria-hidden="true" />
+        </div>
+      )}
+      {embed && error && (
+        <p class="error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+
+  if (embed) {
+    return (
+      <main class="embed" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+        {deviceStage}
+        <AskDialog question={question} close={() => setQuestion(null)} />
+      </main>
+    );
+  }
+
   return (
-    <main
+    <div
+      class="site"
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
-      class={dragging ? "dragging" : ""}
     >
-      {!embed && <SiteHeader />}
+      <SiteHeader />
+      <main id="main">
+        <Prompt command={`./run ${firmware ?? "--firmware=?"}`} />
+        <div class="workspace">
+          <div class="left">
+            {deviceStage}
+          </div>
 
-      <div class={embed ? "layout embed" : "layout"}>
-        <section class="stage" ref={stage} aria-label={tr("device")}>
-          <DeviceView
-            view={view}
-            skin={skinForColour(active?.board.color ?? 2)}
-            canvas={canvas}
-            leds={leds}
-            pressed={pressed}
-            press={press}
-            enabled={hasFirmware}
-            box={deviceBox}
-          />
-          {fetching && (
-            <p class="meter" role="status">
-              {fetching}
-            </p>
-          )}
-          {embed && error && (
-            <p class="error" role="alert">
-              {error}
-            </p>
-          )}
-        </section>
-
-        {!embed && (
-          <>
-            <div class="toolbar">
-              <button type="button" disabled={!hasFirmware} onClick={() => send({ type: "control", action: "reset" })}>
-                {tr("reset")}
-              </button>
-              <button
-                type="button"
-                disabled={!hasFirmware}
-                onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}
-              >
-                {running ? tr("pause") : tr("resume")}
-              </button>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={turbo}
-                  onChange={(e) => {
-                    const on = (e.currentTarget as HTMLInputElement).checked;
-                    setTurbo(on);
-                    send({ type: "turbo", on });
-                  }}
-                />{" "}
-                {tr("turbo")}
-              </label>
-              <button type="button" disabled={!hasFirmware} onClick={screenshot}>
-                {tr("screenshot")}
-              </button>
-              <button type="button" disabled={!hasFirmware || recording === "gif"} onClick={toggleWebm}>
-                {recording === "webm" ? tr("stopRecording") : tr("recordWebm")}
-              </button>
-              <button type="button" disabled={!hasFirmware || recording === "webm"} onClick={toggleGif} title={tr("gifLimit")}>
-                {recording === "gif" ? tr("stopRecording") : tr("recordGif")}
-              </button>
-              <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
-                {tr("fullscreen")}
-              </button>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={ghosting}
-                  onChange={(e) => toggleGhosting((e.currentTarget as HTMLInputElement).checked)}
-                />{" "}
-                {tr("ghosting")}
-              </label>
-            </div>
-            {recording && (
-              <p class="hint rec" role="status">
-                {tr("recording")}
-              </p>
-            )}
-            {status && (
-              <p class="meter">
-                {running ? tr("running") : tr("paused")} · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
-                {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
-              </p>
-            )}
-            <p class="hint">{tr("keyboard")}</p>
+          <div class="right">
             {error && (
               <p class="error" role="alert">
                 {tr("error")}: {error}
@@ -1167,11 +1182,94 @@ export function App({ embed = false }: { embed?: boolean }) {
             {stop && !running && (
               <div class="error" role="alert">
                 <strong>{tr("stopped")}:</strong> {stop.reason}
+                {stop.report && (
+                  <div>
+                    <button type="button" onClick={() => setTab("diagnostics")}>
+                      {tr("openReport")}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
+            {hasFirmware ? (
+              <div class="console">
+            {status && (
+              <p class={running ? "meter" : "meter halted"}>
+                <strong>{running ? tr("running") : tr("paused")}</strong> · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
+                {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
+              </p>
+            )}
+            {hasFirmware && (
+              <div class="toolbar">
+                <div class="group" role="group" aria-label={tr("groupPower")}>
+                  <span aria-hidden="true">{tr("groupPower")}</span>
+                  <button type="button" onClick={() => send({ type: "control", action: "reset" })}>
+                    {tr("reset")}
+                  </button>
+                  <button type="button" onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}>
+                    {running ? tr("pause") : tr("resume")}
+                  </button>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={turbo}
+                      onChange={(e) => {
+                        const on = (e.currentTarget as HTMLInputElement).checked;
+                        setTurbo(on);
+                        send({ type: "turbo", on });
+                      }}
+                    />{" "}
+                    {tr("turbo")}
+                  </label>
+                </div>
+                <div class="group" role="group" aria-label={tr("groupCapture")}>
+                  <span aria-hidden="true">{tr("groupCapture")}</span>
+                  <button type="button" onClick={screenshot}>
+                    {tr("screenshot")}
+                  </button>
+                  <button type="button" disabled={recording === "gif"} onClick={toggleWebm}>
+                    {recording === "webm" ? tr("stopRecording") : tr("recordWebm")}
+                  </button>
+                  <button type="button" disabled={recording === "webm"} onClick={toggleGif} title={tr("gifLimit")}>
+                    {recording === "gif" ? tr("stopRecording") : tr("recordGif")}
+                  </button>
+                </div>
+                <div class="group" role="group" aria-label={tr("groupView")}>
+                  <span aria-hidden="true">{tr("groupView")}</span>
+                  <button type="button" onClick={() => void deviceBox.current?.requestFullscreen()}>
+                    {tr("fullscreen")}
+                  </button>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={ghosting}
+                      onChange={(e) => toggleGhosting((e.currentTarget as HTMLInputElement).checked)}
+                    />{" "}
+                    {tr("ghosting")}
+                  </label>
+                </div>
+              </div>
+            )}
+            {recording && (
+              <p class="hint rec" role="status">
+                {tr("recording")}
+              </p>
+            )}
+            {hasFirmware && <p class="hint">{tr("keyboard")}</p>}
+            {hasFirmware && <p class="hint">{tr("keysNote")}</p>}
+            {provenance && <p class="hint">{noticeText(provenance)}</p>}
+            {installed && <p class="hint">{noticeText(installed)}</p>}
+              </div>
+            ) : (
+              <div class="start">
+                <Picker ready={ready} busy={busy} heading="pickTitle" onUrl={pick} onFile={(f) => void load(f)} />
+              </div>
+            )}
+          </div>
 
+          <div class="side">
             <Tabs tab={tab} setTab={setTab} badge={crashes.length > 0 || !!stop} />
-            <div class="tabpanel" id="tabpanel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
+            <div class={tab === "device" ? "tabpanel two" : "tabpanel"} id="tabpanel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
               {tab === "device" && (
                 <>
                   <section class="tab-section">
@@ -1195,7 +1293,9 @@ export function App({ embed = false }: { embed?: boolean }) {
 
               {tab === "update" && (
                 <section class="tab-section">
-                  <h2>{tr("firmwarePanel")}</h2>
+                  {hasFirmware && (
+                    <Picker ready={ready} busy={busy} heading="pickOther" onUrl={pick} onFile={(f) => void load(f)} />
+                  )}
                   <fieldset class="modes" disabled={!hasFirmware}>
                     <legend>{tr("installMode")}</legend>
                     <label>
@@ -1225,8 +1325,6 @@ export function App({ embed = false }: { embed?: boolean }) {
                   </fieldset>
                   <p class="hint">{tr("quickNote")}</p>
                   <p class="hint">{tr("otaNote")}</p>
-                  {provenance && <p class="hint">{provenance}</p>}
-                  {installed && <p class="hint">{installed}</p>}
                 </section>
               )}
 
@@ -1295,7 +1393,7 @@ export function App({ embed = false }: { embed?: boolean }) {
                   </section>
                   <section class="tab-section">
                     <h2>{tr("log")}</h2>
-                    <pre class="log">{log}</pre>
+                    <pre class="log scroll" tabIndex={0}>{log}</pre>
                   </section>
                   <section class="tab-section">
                     <h2>{tr("eventsPanel")}</h2>
@@ -1303,7 +1401,7 @@ export function App({ embed = false }: { embed?: boolean }) {
                     {events.length === 0 ? (
                       <p class="hint">{tr("noEvents")}</p>
                     ) : (
-                      <ul class="events">
+                      <ul class="events scroll" tabIndex={0}>
                         {events.map((e) => (
                           <li>{e}</li>
                         ))}
@@ -1317,30 +1415,12 @@ export function App({ embed = false }: { embed?: boolean }) {
                 </>
               )}
             </div>
-
-            <label class="drop">
-              <span>{ready ? tr("drop") : tr("starting")}</span>
-              <input
-                type="file"
-                accept=".dfu,.tgz"
-                disabled={!ready}
-                onChange={(e) => {
-                  const input = e.currentTarget as HTMLInputElement;
-                  const f = input.files?.[0];
-                  input.value = "";
-                  if (f) void load(f);
-                }}
-              />
-              <span class="choose">{tr("choose")}</span>
-              <span class="hint">{tr("privacy")}</span>
-            </label>
-          </>
-        )}
-      </div>
-
+          </div>
+        </div>
+      </main>
+      {dragging && <div class="veil">{tr("dropAnywhere")}</div>}
       <AskDialog question={question} close={() => setQuestion(null)} />
-
-      {!embed && <SiteFooter />}
-    </main>
+      <SiteFooter />
+    </div>
   );
 }

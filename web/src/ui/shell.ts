@@ -241,6 +241,17 @@ export function fitView(available: number, height = Infinity, maxScale = 4): Vie
   return { model: tall, scale: Math.max(1, scaleFor(tall)) };
 }
 
+/** Below this width the page is one column, as `.workspace` in style.css. */
+const TWO_COLUMNS = 960;
+/** What stays in view around the device in two columns: header, prompt, colour choice, margins. */
+const AROUND_DEVICE = 240;
+
+/** The device in the page: in two columns it leaves room for its controls, but never drops below twice its pixels. */
+export function fitWorkspace(available: number, windowWidth: number, windowHeight: number): View {
+  if (windowWidth < TWO_COLUMNS) return fitView(available);
+  return fitView(available, Math.max(windowHeight - AROUND_DEVICE, totalHeight(landscape()) * 2));
+}
+
 /** Size of the drawing in art pixels. */
 export function artSize(m: Model): { width: number; height: number } {
   return { width: Math.ceil(m.width / ART_STEP), height: Math.ceil(totalHeight(m) / ART_STEP) };

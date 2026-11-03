@@ -25,4 +25,8 @@ Flipper Zero is a trademark of its respective owner.
 
 - Unicorn Engine 2 (GPL-2.0) — reference CPU for differential testing only (ADR-0001).
 
+## Fonts (distributed with the site)
+
+- JetBrains Mono, Share Tech Mono, IBM Plex Sans (SIL Open Font License 1.1), through the `@fontsource` npm packages.
+
 If code or models are ported from any project, its copyright notice is kept and it is listed here.

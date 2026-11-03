@@ -6,6 +6,8 @@ import preact from "@preact/preset-vite";
 export default defineConfig({
   base: "./",
   plugins: [preact()],
+  // Nothing inlined: the CSP has no `data:` for fonts.
+  build: { assetsInlineLimit: 0 },
   // The emulator worker is an ES module (top-level await for the wasm init).
   worker: { format: "es" },
 });
