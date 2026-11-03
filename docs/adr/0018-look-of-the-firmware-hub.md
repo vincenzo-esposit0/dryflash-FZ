@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
-# ADR-0018: The site takes the look of the Firmware Hub
+# ADR-0018 — The site takes the look of the Firmware Hub
 
-**Status:** Accepted
+- Status: **Accepted**
+- Date: 2026-11-03
+- Milestone: design review after M6
 
 ## Context
 
