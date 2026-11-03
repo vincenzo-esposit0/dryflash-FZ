@@ -93,7 +93,7 @@ test.describe("with a firmware", () => {
     await bootToPopup(page);
     await expect(page.locator(".log")).toContainText("card mounted");
     const popup = await screen(page);
-    await page.locator("h1").click();
+    await page.locator("footer p").first().click();
     await page.keyboard.press("Escape");
     await expectScreenChanges(page, popup);
     await page.waitForTimeout(500);
@@ -116,6 +116,37 @@ test.describe("with a firmware", () => {
     const menu = await screen(page);
     await page.locator(".key.down").click();
     await expectScreenChanges(page, menu);
+  });
+
+  test("a firmware from the list downloads, says so, and boots", async ({ page }) => {
+    const url = "https://update.flipperzero.one/builds/firmware/1.5.1/flipper-z-f7-update-1.5.1.tgz";
+    await page.route(url, (route) =>
+      route.fulfill({ path: TGZ, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/gzip" } }),
+    );
+    await page.goto("/");
+    await expect(page.locator(".fw")).toHaveCount(4);
+    await page.locator(".fw", { hasText: "Official" }).click();
+    await expect(page.locator(".meter")).toContainText("Running", { timeout: 30_000 });
+    await expect(page.getByText(`loaded from ${url}`)).toBeVisible();
+    await expect(page.locator(".start")).toHaveCount(0);
+    await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
+    await expect(page.locator(".progress")).toHaveCount(0);
+  });
+
+  test("switching language leaves the running firmware alone, and is remembered", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    const seconds = async () => Number(/(\d+\.\d) s/.exec((await page.locator(".meter").textContent()) ?? "")![1]);
+    const before = await seconds();
+    await page.getByRole("button", { name: /IT \/ EN/ }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "it");
+    await expect(page.getByRole("tab", { name: "Diagnostica" })).toBeVisible();
+    await expect(page.locator(".meter")).toContainText("In esecuzione");
+    expect(await seconds()).toBeGreaterThanOrEqual(before);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", "it");
+    await page.getByRole("button", { name: /IT \/ EN/ }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
   });
 
   test("a reload resumes the device with its firmware and card", async ({ page }) => {
@@ -218,6 +249,12 @@ test.describe("links and the proxy", () => {
     ).toBe(403);
   });
 
+  test("the icons are served", async ({ request }) => {
+    for (const icon of ["/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png"]) {
+      expect((await request.get(icon)).status()).toBe(200);
+    }
+  });
+
   test("only the embed page may be framed", async ({ request }) => {
     const frame = async (p: string) => (await request.get(p)).headers()["content-security-policy"];
     expect(await frame("/embed")).toContain("frame-ancestors *");
@@ -262,6 +299,8 @@ test.describe("pages", () => {
     await expect(frame.locator(".key.ok")).toBeAttached();
     await expect(frame.locator(".tabs")).toHaveCount(0);
     await expect(frame.locator("nav")).toHaveCount(0);
+    await expect(frame.locator(".picker")).toHaveCount(0);
+    await expect(frame.locator(".skins")).toHaveCount(0);
   });
 
   test("a phone-sized window has no sideways scroll, and the panel is whole-number sized", async ({ page }) => {
@@ -384,13 +423,11 @@ test.describe("device skin", () => {
     await page.goto("/");
     await expect(page.getByText("Drop a firmware")).toBeVisible();
     const white = await body(page);
-    await page.locator("summary", { hasText: "Device settings" }).click();
-    const colour = page.getByLabel("Colour");
-    await expect(colour).toHaveValue("2");
-    await colour.selectOption("1");
+    await expect(page.getByRole("radio", { name: "White" })).toBeChecked();
+    await page.getByRole("radio", { name: "Black" }).check();
     await expect.poll(() => body(page)).not.toBe(white);
     const black = await body(page);
-    await colour.selectOption("3");
+    await page.getByRole("radio", { name: "Transparent" }).check();
     await expect.poll(() => body(page)).not.toBe(black);
     const transparent = await body(page);
     expect(transparent).not.toBe(white);

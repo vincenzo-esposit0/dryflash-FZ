@@ -845,3 +845,18 @@ All four, run here in about 10 minutes. No release newer than the pinned one exi
 - Still open from this milestone: why the log goes silent after an OTA on Momentum, Unleashed and RogueMaster; a real proof that the `RangeError` is gone; a crash through the action on real firmware.
 
 Demo: `/compat` on the site, https://github.com/vincenzo-esposit0/dryflash-action-test/pull/1 for the action, and `node runner/bin/dryflash.mjs run <firmware.tgz> --screenshots out` for the runner.
+
+### Design review: the look of the Firmware Hub (ADR-0018)
+
+The site takes the Hub's colours, fonts and type scale, and the page is rebuilt around loading a firmware. At 1024×768 the file area now ends about 615 px down, where it used to sit near 1080 px.
+
+- **Layout:** device on the left; on the right the pinned firmware list, one click each, or the controls once one runs. The tabs go below at the full width of both. Dropping a file works anywhere on the page.
+- **Feedback:** download, install and boot show progress, and boot ends at the firmware's first pixels. One line explains "No Factory Keys Found" (ADR-0012).
+- **Languages:** an IT / EN switch that redraws the page, so a running firmware does not restart. Fidelity notes and crash text come from the core and stay in English.
+- **Fonts are self-hosted:** the CSP allows no other host. Measured against the Hub at 1280 px: same families, sizes, weights and smoothing on body, navigation and buttons.
+- **A real bug the checks found:** in the narrower column the log and tables scrolled but could not be reached by keyboard. They now take focus and keep their arrow keys.
+- **Trade-off:** with the panels below, the device scrolls away while reading a long log.
+- **Known wart:** a firmware that goes through the proxy leaves a CORS error in the browser console, because the direct download is tried first. `cors` in `compat.json` could avoid it.
+- **Not tested:** Firefox locally (CI runs it); Unleashed and RogueMaster from the list; Official's real download from the list (the E2E test mocks it; Momentum was run for real through the proxy); the favicon in a real browser tab.
+
+Demo: open the site in a private window, pick a firmware, then switch IT / EN while it runs.

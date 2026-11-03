@@ -3,15 +3,15 @@ import { useEffect, useState } from "preact/hooks";
 import compat from "../../firmware/compat.json";
 import results from "../../firmware/compat-results.json";
 import type { FidelityRow } from "./emu/protocol";
-import { detectLocale, t, type Key } from "./i18n";
-import { SiteFooter, SiteHeader } from "./ui/chrome";
+import { tr, type Key } from "./i18n";
+import { Prompt, SiteFooter, SiteHeader } from "./ui/chrome";
 
-const locale = detectLocale(navigator.languages ?? [navigator.language]);
-const tr = (k: Key) => t(locale, k);
 
 export function Fidelity({ rows }: { rows: FidelityRow[] }) {
   return (
-    <div class="table">
+    <>
+    {tr("coreEnglish") && <p class="hint">{tr("coreEnglish")}</p>}
+    <div class="table scroll" tabIndex={0}>
       <table>
         <thead>
           <tr>
@@ -31,6 +31,7 @@ export function Fidelity({ rows }: { rows: FidelityRow[] }) {
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
@@ -77,11 +78,13 @@ export function CompatPage() {
     return rows.filter(([, problem]) => problem);
   });
   return (
-    <main class="page">
+    <div class="site">
       <SiteHeader />
+      <main class="page" id="main">
+      <Prompt command="cat COMPATIBILITY.md" />
       <h2>{tr("compatTitle")}</h2>
       <p>{tr("compatIntro").replace("{date}", results.checked)}</p>
-      <div class="table">
+      <div class="table scroll" tabIndex={0}>
         <table>
           <thead>
             <tr>
@@ -116,8 +119,9 @@ export function CompatPage() {
         </ul>
       )}
       <p class="hint">{tr("compatLimits")}</p>
+      </main>
       <SiteFooter />
-    </main>
+    </div>
   );
 }
 
@@ -131,8 +135,10 @@ export function AboutPage() {
     });
   }, []);
   return (
-    <main class="page">
+    <div class="site">
       <SiteHeader />
+      <main class="page" id="main">
+      <Prompt command="cat ABOUT.md" />
       <h2>{tr("aboutTitle")}</h2>
       <h3>{tr("aboutHow")}</h3>
       <p>{tr("aboutHowText")}</p>
@@ -145,7 +151,8 @@ export function AboutPage() {
         {tr("aboutCreditsText")}{" "}
         <a href="https://github.com/vincenzo-esposit0/dryflash-FZ/blob/main/CREDITS.md">CREDITS.md</a>
       </p>
+      </main>
       <SiteFooter />
-    </main>
+    </div>
   );
 }
