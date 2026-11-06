@@ -20,7 +20,7 @@ pub const FIDELITY: (Fidelity, &str) = (
 );
 
 const CR: u32 = svd::RCC.offset_of("CR");
-const CFGR: u32 = svd::RCC.offset_of("CFGR");
+pub const CFGR: u32 = svd::RCC.offset_of("CFGR");
 const PLLCFGR: u32 = svd::RCC.offset_of("PLLCFGR");
 const CIER: u32 = svd::RCC.offset_of("CIER");
 const CIFR: u32 = svd::RCC.offset_of("CIFR");
@@ -32,6 +32,10 @@ const EXTCFGR: u32 = svd::RCC.offset_of("EXTCFGR");
 pub const CCIPR: u32 = svd::RCC.offset_of("CCIPR");
 pub const APB1RSTR1: u32 = svd::RCC.offset_of("APB1RSTR1");
 pub const APB1RSTR2: u32 = svd::RCC.offset_of("APB1RSTR2");
+pub const APB2RSTR: u32 = svd::RCC.offset_of("APB2RSTR");
+pub const APB2ENR: u32 = svd::RCC.offset_of("APB2ENR");
+/// TIM16 in APB2ENR and APB2RSTR (stm32wb55xx.h: RCC_APB2ENR_TIM16EN_Pos, RCC_APB2RSTR_TIM16RST_Pos, 17).
+pub const APB2_TIM16: u32 = 1 << 17;
 
 /// (enable bit, ready bit) pairs in CR.
 const CR_READY: &[(u32, u32)] = &[(0, 1), (8, 10), (9, 12), (16, 17), (24, 25), (26, 27)];

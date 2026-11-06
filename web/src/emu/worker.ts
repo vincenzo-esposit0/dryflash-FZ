@@ -15,6 +15,7 @@ import {
 } from "./devices";
 import { BUTTONS, PROTOCOL_VERSION, type FromWorker, type ToWorker } from "./protocol";
 import { Pacer, PressTimer, SLICE_BUDGET_MS, STEP_MS } from "./scheduler";
+import { decodeSenses } from "./senses";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FromWorker, transfer: Transferable[] = []) => ctx.postMessage(m, transfer);
@@ -140,6 +141,8 @@ function publish(force: boolean) {
     lastLights = key;
     post({ type: "lights", rgbw: [l[0], l[1], l[2], l[3]] });
   }
+  const senses = e.take_senses();
+  if (senses.length) post({ type: "senses", changes: decodeSenses(senses) });
   const log = e.take_log();
   if (log.length) {
     logTail = (logTail + logDecoder.decode(log, { stream: true })).slice(-4096);

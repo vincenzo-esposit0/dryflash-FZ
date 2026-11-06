@@ -501,6 +501,22 @@ impl Emulator {
         vec![l.red, l.green, l.blue, l.white]
     }
 
+    /// Speaker and vibration motor changes since the last call, four numbers each: virtual ms,
+    /// kind (0 speaker silent, 1 speaker tone, 2 motor off, 3 motor on), frequency in Hz, duty cycle.
+    pub fn take_senses(&mut self) -> Vec<f64> {
+        use dryflash_core::board::senses::Sense;
+        let mut out = Vec::new();
+        for e in self.m.take_senses() {
+            let (kind, hz, duty) = match e.sense {
+                Sense::Speaker(None) => (0.0, 0.0, 0.0),
+                Sense::Speaker(Some(t)) => (1.0, t.hz as f64, t.duty as f64),
+                Sense::Vibro(on) => (if on { 3.0 } else { 2.0 }, 0.0, 0.0),
+            };
+            out.extend([e.at_ns as f64 / 1e6, kind, hz, duty]);
+        }
+        out
+    }
+
     pub fn cycles(&self) -> f64 {
         self.m.cpu.cycles as f64
     }

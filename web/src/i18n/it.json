@@ -103,7 +103,7 @@
   "eventsPanel": "Eventi",
   "noEvents": "Ancora nessun evento.",
   "ledEvent": "LED R{r} G{g} B{b}, retroilluminazione {w}",
-  "moreEventsLater": "Per ora i cambi dei LED; IR, vibrazione e GPIO arriveranno con quelle periferiche.",
+  "moreEventsLater": "Per ora LED, altoparlante e vibrazione; IR e GPIO arriveranno con quelle periferiche.",
   "recording": "Registrazione in corso…",
   "gifLimit": "La GIF si ferma da sola dopo 30 secondi.",
   "noRecorder": "Questo browser non può registrare video.",
@@ -181,5 +181,12 @@
   "technicalDetails": "Dettagli tecnici",
   "openReport": "Apri il rapporto crash",
   "switchLanguage": "IT / EN: cambia lingua",
-  "coreEnglish": "Le note tecniche vengono dal core dell'emulatore e restano in inglese."
+  "coreEnglish": "Le note tecniche vengono dal core dell'emulatore e restano in inglese.",
+  "sound": "Suono",
+  "soundNote": "Muto quando si apre la pagina. In pausa e in Turbo resta in silenzio, perché il tempo virtuale corre più dell'orologio.",
+  "noAudio": "Questo browser non può riprodurre suoni.",
+  "vibroOn": "Vibrazione accesa",
+  "vibroOff": "Vibrazione spenta",
+  "toneEvent": "Altoparlante {hz} Hz",
+  "toneOff": "Altoparlante muto"
 }

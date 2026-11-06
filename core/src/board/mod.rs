@@ -18,6 +18,9 @@ pub const CC1101_G0: (usize, u8) = (PORT_A, 1);
 pub const NFC_CS: (usize, u8) = (4, 4);
 pub const SD_CD: (usize, u8) = (PORT_C, 10);
 pub const DISPLAY_RST: (usize, u8) = (PORT_B, 0);
+/// Speaker and vibration motor (furi_hal_resources.h: SPEAKER PB8, VIBRO PA8).
+pub const SPEAKER: (usize, u8) = (PORT_B, 8);
+pub const VIBRO: (usize, u8) = (PORT_A, 8);
 
 /// The six buttons (furi_hal_resources.c `input_pins`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,6 +64,7 @@ pub mod fat32;
 pub mod lp5562;
 pub mod otp;
 pub mod sdcard;
+pub mod senses;
 pub mod st25r3916;
 pub mod st7567;
 

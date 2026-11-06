@@ -23,9 +23,14 @@ import { Prompt, SiteFooter, SiteHeader } from "./ui/chrome";
 import { Picker } from "./ui/picker";
 import { ART_STEP, artSize, drawView, fitView, fitWorkspace, type Skin, skinForColour, toRgba, type View } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
+import { Speaker } from "./ui/sound";
 
 const LOG_LIMIT = 64 * 1024;
 const EVENT_LIMIT = 200;
+/** A buzz stays visible at least this long: the firmware's are often 100 ms or less. */
+const BUZZ_MIN_MS = 200;
+/** Longest phone vibration asked for at once; the motor going off cancels it. */
+const BUZZ_MAX_MS = 10_000;
 /** Screenshots and videos: 4× the panel (BRIEF §9). */
 const CAPTURE_SCALE = 4;
 const GIF_SCALE = 2;
@@ -186,6 +191,7 @@ function DeviceView({
   pressed,
   press,
   enabled,
+  buzzing,
   box,
 }: {
   view: View;
@@ -195,6 +201,8 @@ function DeviceView({
   pressed: Set<ButtonName>;
   press: (b: ButtonName, d: boolean) => void;
   enabled: boolean;
+  /** The vibration motor is on. */
+  buzzing: boolean;
   box: preact.RefObject<HTMLDivElement | null>;
 }) {
   const m = view.model;
@@ -235,7 +243,7 @@ function DeviceView({
   const half = Math.floor(cell / 2);
   return (
     <div
-      class="device"
+      class={buzzing ? "device buzz" : "device"}
       ref={box}
       style={{
         width: `${size.width * ART_STEP * view.scale}px`,
@@ -634,6 +642,13 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [turbo, setTurbo] = useState(false);
   const [ghosting, setGhosting] = useState(false);
+  const [speaker] = useState(() => new Speaker());
+  const [sound, setSound] = useState(false);
+  /** Sound plays only at 1×: paused or in Turbo, virtual time and wall time part. */
+  const audible = useRef(false);
+  const [buzzing, setBuzzing] = useState(false);
+  const buzzUntil = useRef(0);
+  const buzzTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [recording, setRecording] = useState<"webm" | "gif" | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
   const [fetching, setFetching] = useState<{ text: string; percent: number | null } | null>(null);
@@ -761,6 +776,7 @@ export function App({ embed = false }: { embed?: boolean }) {
           setCardUsed(m.cardUsedBytes);
           setFirmware(m.hasFirmware ? (m.active.firmware ?? "?") : null);
           setStatus(null);
+          quiet();
           break;
         case "exported":
           download(`${m.name.replace(/[^\w.-]+/g, "_")}.dryflash`, m.bytes, "application/gzip");
@@ -782,6 +798,7 @@ export function App({ embed = false }: { embed?: boolean }) {
           setInstalled(m.packageInfo ? { key: "installed", vars: { files: String(m.packageInfo.files), info: m.packageInfo.info } } : null);
           setLog("");
           setEvents([]);
+          quiet();
           setStop(null);
           setError(null);
           setPhase("booting");
@@ -818,6 +835,27 @@ export function App({ embed = false }: { embed?: boolean }) {
           );
           redraw();
           break;
+        case "senses":
+          if (audible.current) speaker.play(m.changes);
+          for (const c of m.changes) {
+            if ("vibro" in c) buzz(c.vibro);
+          }
+          setEvents((list) =>
+            [
+              ...m.changes.map(
+                (c) =>
+                  `${new Date().toLocaleTimeString()} ${
+                    "vibro" in c
+                      ? tr(c.vibro ? "vibroOn" : "vibroOff")
+                      : c.tone
+                        ? tr("toneEvent").replace("{hz}", c.tone.hz.toFixed(0))
+                        : tr("toneOff")
+                  }`,
+              ).reverse(),
+              ...list,
+            ].slice(0, EVENT_LIMIT),
+          );
+          break;
         case "log": {
           const text = stripAnsi(decoder.decode(new Uint8Array(m.bytes), { stream: true }));
           setLog((l) => (l + text).slice(-LOG_LIMIT));
@@ -825,9 +863,12 @@ export function App({ embed = false }: { embed?: boolean }) {
         }
         case "status":
           setStatus(m.status);
+          audible.current = m.status.running && !m.status.turbo;
+          if (!audible.current) speaker.silence();
           break;
         case "stopped":
           setPhase(null);
+          quiet();
           setStop({
             reason: m.reason,
             crashes: m.crashes,
@@ -1093,6 +1134,36 @@ export function App({ embed = false }: { embed?: boolean }) {
     setRecording("gif");
   };
 
+  /** The motor's state on the page, and on a phone's own motor. */
+  const buzz = (on: boolean) => {
+    clearTimeout(buzzTimer.current);
+    const phone = "vibrate" in navigator && matchMedia("(pointer: coarse)").matches;
+    if (on) {
+      buzzUntil.current = performance.now() + BUZZ_MIN_MS;
+      setBuzzing(true);
+      if (phone) navigator.vibrate(BUZZ_MAX_MS);
+    } else {
+      if (phone) navigator.vibrate(0);
+      buzzTimer.current = setTimeout(() => setBuzzing(false), Math.max(0, buzzUntil.current - performance.now()));
+    }
+  };
+
+  /** Nothing plays or buzzes: the firmware stopped, or another one or another device took over. */
+  const quiet = () => {
+    audible.current = false;
+    speaker.silence();
+    buzz(false);
+  };
+
+  const toggleSound = async (on: boolean) => {
+    setSound(on);
+    if (!on) return void (await speaker.disable());
+    if (!(await speaker.enable())) {
+      setSound(false);
+      setError(tr("noAudio"));
+    }
+  };
+
   const toggleGhosting = (on: boolean) => {
     setGhosting(on);
     ghostOn.current = on;
@@ -1123,6 +1194,7 @@ export function App({ embed = false }: { embed?: boolean }) {
         pressed={pressed}
         press={press}
         enabled={hasFirmware}
+        buzzing={buzzing}
         box={deviceBox}
       />
       {!embed && <SkinChoice device={active} send={send} />}
@@ -1206,7 +1278,13 @@ export function App({ embed = false }: { embed?: boolean }) {
                   <button type="button" onClick={() => send({ type: "control", action: "reset" })}>
                     {tr("reset")}
                   </button>
-                  <button type="button" onClick={() => send({ type: "control", action: running ? "pause" : "resume" })}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (running) quiet();
+                      send({ type: "control", action: running ? "pause" : "resume" });
+                    }}
+                  >
                     {running ? tr("pause") : tr("resume")}
                   </button>
                   <label>
@@ -1216,6 +1294,7 @@ export function App({ embed = false }: { embed?: boolean }) {
                       onChange={(e) => {
                         const on = (e.currentTarget as HTMLInputElement).checked;
                         setTurbo(on);
+                        if (on) quiet();
                         send({ type: "turbo", on });
                       }}
                     />{" "}
@@ -1246,6 +1325,10 @@ export function App({ embed = false }: { embed?: boolean }) {
                       onChange={(e) => toggleGhosting((e.currentTarget as HTMLInputElement).checked)}
                     />{" "}
                     {tr("ghosting")}
+                  </label>
+                  <label title={tr("soundNote")}>
+                    <input type="checkbox" checked={sound} onChange={(e) => void toggleSound((e.currentTarget as HTMLInputElement).checked)} />{" "}
+                    {tr("sound")}
                   </label>
                 </div>
               </div>
