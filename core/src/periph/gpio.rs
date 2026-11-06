@@ -8,12 +8,13 @@
 use super::regfile::{PeriphDesc, RegFile};
 use super::svd;
 
-const MODER: u32 = svd::GPIOA.offset_of("MODER");
+pub const MODER: u32 = svd::GPIOA.offset_of("MODER");
 const PUPDR: u32 = svd::GPIOA.offset_of("PUPDR");
 const IDR: u32 = svd::GPIOA.offset_of("IDR");
 const ODR: u32 = svd::GPIOA.offset_of("ODR");
 const BSRR: u32 = svd::GPIOA.offset_of("BSRR");
 const BRR: u32 = svd::GPIOA.offset_of("BRR");
+pub const AFRH: u32 = svd::GPIOA.offset_of("AFRH");
 
 #[derive(Clone, Debug)]
 pub struct Gpio {
@@ -70,6 +71,11 @@ impl Gpio {
     /// board (pull-ups), while `levels` would read it as 0.
     pub fn driven_low(&self, pin: u8) -> bool {
         self.output_mask() & (1 << pin) != 0 && self.regs.get(ODR) & (1 << pin) == 0
+    }
+
+    /// The pin is an output driven high.
+    pub fn driven_high(&self, pin: u8) -> bool {
+        self.output_mask() & (1 << pin) != 0 && self.regs.get(ODR) & (1 << pin) != 0
     }
 
     /// A board device drives (or releases, with `None`) pin `pin`.

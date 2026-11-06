@@ -860,3 +860,29 @@ The site takes the Hub's colours, fonts and type scale, and the page is rebuilt 
 - **Not tested:** Firefox locally (CI runs it); Unleashed and RogueMaster from the list; Official's real download from the list (the E2E test mocks it; Momentum was run for real through the proxy); the favicon in a real browser tab.
 
 Demo: open the site in a private window, pick a firmware, then switch IT / EN while it runs.
+
+## M7 — Senses & CLI
+
+### Checkpoint 1 — speaker and vibration motor
+
+The firmware's own sounds and buzzes now reach the page. Both are driven from the firmware's registers, nothing is played from a list.
+
+- **Speaker.** TIM16 has its own model (`core/src/periph/tim16.rs`): channel 1 in PWM mode, as `furi_hal_speaker.c` sets it, gives a
+  frequency and a duty cycle when the counter, the main output, the channel and PB8 in alternate function 14 are all on, and TIM16's clock
+  is enabled. The page plays that as a square wave whose loudness follows the duty cycle (the fundamental of a pulse wave is proportional
+  to sin(π·duty)), not the PWM signal itself: **Partial**. The counter does not run and there are no TIM16 interrupts.
+- **Vibration motor.** PA8 as an output (`furi_hal_vibro.c`): **Emulated**. The device shakes on the page, at least 200 ms so a 100 ms buzz
+  is seen; with reduced motion it gets an outline instead. Phones also vibrate through `navigator.vibrate`.
+- **Timing.** Each change carries its virtual time, and the page schedules it on the audio clock 120 ms ahead, so a note keeps its length
+  even though the worker reports between slices. After a pause or a burst the two clocks are lined up again.
+- **Sound is off** when the page opens (BRIEF §5.4) and stays silent while paused and in Turbo, where virtual time runs ahead of the clock.
+  The Events panel lists speaker and motor changes next to the LEDs.
+- **Checked on the official firmware**, in `core/tests/senses_official.rs` and in E2E on Chromium and WebKit: in Settings → LCD and
+  Notifications, changing Volume plays C5 for 100 ms and switching Vibro on buzzes for 100 ms (`notification_settings_app.c`). C5 comes
+  out at 524.59 Hz, not 523.25: the firmware rounds the period to whole timer ticks of 64 MHz / 500, as the real device does.
+- **Not tested:** how it sounds, by ear, in a real browser; a phone's own vibration; music with fast note changes; Firefox (CI runs it);
+  other firmwares, which are expected to drive TIM16 the same way but were not tried.
+- **Docs:** the roadmap now shows M3–M6 as done, and lists IR TX for M7, which ARCHITECTURE §6 already planned.
+
+Demo: pick a firmware, tick **Sound**, then on the device go to Settings → LCD and Notifications, move to Volume and press Left; then to
+Vibro and switch it off and on.

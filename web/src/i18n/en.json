@@ -103,7 +103,7 @@
   "eventsPanel": "Events",
   "noEvents": "No events yet.",
   "ledEvent": "LED R{r} G{g} B{b}, backlight {w}",
-  "moreEventsLater": "LED changes for now; IR, vibration and GPIO arrive with those peripherals.",
+  "moreEventsLater": "LEDs, speaker and vibration for now; IR and GPIO arrive with those peripherals.",
   "recording": "Recording…",
   "gifLimit": "GIF stops by itself after 30 seconds.",
   "noRecorder": "This browser cannot record video.",
@@ -181,5 +181,12 @@
   "technicalDetails": "Technical details",
   "openReport": "Open the crash report",
   "switchLanguage": "IT / EN: switch the language",
-  "coreEnglish": ""
+  "coreEnglish": "",
+  "sound": "Sound",
+  "soundNote": "Muted when the page opens. Silent while paused and in Turbo, where virtual time runs ahead of the clock.",
+  "noAudio": "This browser cannot play sound.",
+  "vibroOn": "Vibration on",
+  "vibroOff": "Vibration off",
+  "toneEvent": "Speaker {hz} Hz",
+  "toneOff": "Speaker silent"
 }

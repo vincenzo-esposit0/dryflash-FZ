@@ -198,6 +198,43 @@ test.describe("with a firmware", () => {
     expect(bytes.subarray(0, 6).toString()).toBe("GIF89a");
   });
 
+  // Settings → LCD and Notifications: changing Volume plays C5, switching Vibro on vibrates (notification_settings_app.c).
+  test("the firmware's own beep plays through WebAudio, and its buzz shows", async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __audio: [string, number][] };
+      w.__audio = [];
+      const set = AudioParam.prototype.setValueAtTime;
+      AudioParam.prototype.setValueAtTime = function (value: number, time: number) {
+        w.__audio.push([this.defaultValue === 440 ? "hz" : "gain", value]); // an oscillator's frequency starts at 440
+        return set.call(this, value, time);
+      };
+    });
+    await install(page);
+    await bootToPopup(page);
+    await page.getByRole("checkbox", { name: "Sound" }).check();
+    await page.locator("footer p").first().click(); // keys to the device, not the checkbox
+    const step = async (key: string) => {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(700);
+    };
+    // Popup, menu, Settings (Up wraps to Apps, then Settings), LCD and Notifications, down to Volume.
+    for (const key of ["Escape", "Enter", "ArrowUp", "ArrowUp", "Enter", "ArrowDown", "Enter"]) await step(key);
+    for (let i = 0; i < 4; i++) await step("ArrowDown");
+    await step("ArrowLeft");
+    const events = page.locator(".events");
+    // 524.59 Hz: the firmware rounds C5 to whole timer ticks.
+    await expect(events).toContainText("Speaker 525 Hz");
+    await expect(events).toContainText("Speaker silent");
+    const audio = await page.evaluate(() => (window as unknown as { __audio: [string, number][] }).__audio);
+    expect(audio.some(([p, v]) => p === "hz" && Math.abs(v - 524.59) < 0.1)).toBe(true);
+    expect(audio.some(([p, v]) => p === "gain" && v > 0)).toBe(true);
+
+    for (const key of ["ArrowDown", "ArrowLeft", "ArrowRight"]) await step(key);
+    await expect(events).toContainText("Vibration on");
+    await expect(events).toContainText("Vibration off");
+    await expect(page.locator(".device.buzz")).toHaveCount(0);
+  });
+
   test("a device exports and imports as a new one with its firmware", async ({ page }) => {
     await install(page);
     await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);

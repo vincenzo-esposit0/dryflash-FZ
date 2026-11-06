@@ -4,8 +4,9 @@
 
 import type { Persistence } from "./cardstore";
 import type { BatterySettings, BoardSettings, DeviceMeta } from "./devices";
+import type { SenseChange } from "./senses";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Button indices understood by the core (core-wasm `set_button`). */
 export const BUTTONS = ["up", "down", "left", "right", "ok", "back"] as const;
@@ -120,6 +121,8 @@ export type FromWorker =
   | { type: "milestone"; name: "booted" | "desktopReached" }
   | { type: "frame"; bits: ArrayBuffer }
   | { type: "lights"; rgbw: [number, number, number, number] }
+  /** Speaker and vibration motor changes, in virtual time, since the last message. */
+  | { type: "senses"; changes: SenseChange[] }
   | { type: "log"; bytes: ArrayBuffer }
   | { type: "status"; status: Status }
   | {

@@ -23,6 +23,7 @@ pub mod rtc;
 pub mod spi;
 #[rustfmt::skip]
 pub mod svd;
+pub mod tim16;
 pub mod usart;
 
 use crate::cpu::Size;
@@ -86,6 +87,7 @@ enum Slot {
     Rng,
     Iwdg,
     Lptim(usize),
+    Tim16,
     Generic(usize),
 }
 
@@ -110,6 +112,8 @@ pub struct Periphs {
     pub iwdg: iwdg::Iwdg,
     /// LPTIM1 (Furi's tickless idle timer), LPTIM2.
     pub lptim: Vec<lptim::Lptim>,
+    /// The speaker's timer.
+    pub tim16: tim16::Tim16,
     /// Register-file-only peripherals.
     pub generic: Vec<RegFile>,
     /// (base, end, slot), sorted by base.
@@ -135,6 +139,8 @@ pub struct Periphs {
     pub st25r3916: crate::board::st25r3916::St25r3916,
     /// Buttons currently held by the user.
     pub buttons_down: Vec<crate::board::Button>,
+    /// Speaker and vibration motor, with their changes over time.
+    pub senses: crate::board::senses::Senses,
 }
 
 impl Default for Periphs {
@@ -150,6 +156,7 @@ impl Periphs {
         let (mut gpio, mut i2c, mut generic) = (Vec::new(), Vec::new(), Vec::new());
         let (mut spi, mut usart, mut dma) = ([None, None], [None, None], [None, None]);
         let mut lptim = Vec::new();
+        let mut tim16 = None;
         let mut map = Vec::new();
         for (i, d) in descs.iter().enumerate() {
             // A block extends to the next block or its last register, within the 1 KiB stride.
@@ -194,6 +201,10 @@ impl Periphs {
                     lptim.push(lptim::Lptim::new(d));
                     Slot::Lptim(lptim.len() - 1)
                 }
+                "TIM16" => {
+                    tim16 = Some(tim16::Tim16::new(d));
+                    Slot::Tim16
+                }
                 _ => {
                     generic.push(RegFile::new(d));
                     Slot::Generic(generic.len() - 1)
@@ -226,6 +237,7 @@ impl Periphs {
             rng: rng::Rng::new(rng::DEFAULT_SEED),
             iwdg: iwdg::Iwdg::new(),
             lptim,
+            tim16: tim16.expect("TIM16 in the SVD"),
             generic,
             map,
             clocks,
@@ -241,6 +253,7 @@ impl Periphs {
             last_levels: [0; 6],
             sd: None,
             buttons_down: Vec::new(),
+            senses: Default::default(),
         }
     }
 
@@ -421,6 +434,7 @@ impl Periphs {
         self.rng.reset();
         self.iwdg.reset();
         self.lptim.iter_mut().for_each(|l| l.reset());
+        self.tim16.reset();
         if kind == ResetKind::PowerOn {
             // The RTC is in the backup domain: only power-on (or BDRST) resets it.
             self.rtc.reset(ns);
@@ -438,6 +452,7 @@ impl Periphs {
         self.generic.iter_mut().for_each(|g| g.reset());
         self.clocks = self.rcc.clocks();
         self.update_irqs();
+        self.update_senses(ns);
     }
 
     /// Runs peripheral events that are due and recomputes `next_event`.
@@ -530,6 +545,7 @@ impl Periphs {
             Slot::Rng => &self.rng.regs,
             Slot::Iwdg => &self.iwdg.regs,
             Slot::Lptim(i) => &self.lptim[i].regs,
+            Slot::Tim16 => &self.tim16.regs,
             Slot::Generic(i) => &self.generic[i],
         }
     }
@@ -580,6 +596,7 @@ impl Periphs {
                 self.update_irqs();
                 v
             }
+            Slot::Tim16 => self.tim16.read(word_off),
             // SPI DR reads pop frames from the FIFO: the access size matters.
             Slot::Spi(i) => return Some(self.spi[i].read(off, size).unwrap_or(0)),
             Slot::Generic(i) => {
@@ -636,6 +653,9 @@ impl Periphs {
                 }
                 if self.rcc.regs.get(rcc::APB1RSTR2) & (1 << 5) != 0 {
                     self.lptim[1].reset();
+                }
+                if self.rcc.regs.get(rcc::APB2RSTR) & rcc::APB2_TIM16 != 0 {
+                    self.tim16.reset();
                 }
                 self.lptim_clocks();
                 self.update_irqs();
@@ -701,6 +721,7 @@ impl Periphs {
                 self.irq_dirty = true;
                 h
             }
+            Slot::Tim16 => self.tim16.write(word_off, value),
             Slot::Spi(_) => unreachable!(),
             Slot::Generic(i) => {
                 let ok = self.generic[i].write(word_off, value);
@@ -713,7 +734,36 @@ impl Periphs {
         if !handled {
             ctx.digest.unimplemented(addr, true, Some(value), ctx.pc);
         }
+        if matches!(slot, Slot::Tim16 | Slot::Rcc | Slot::Gpio(_)) {
+            let ns = self.now_ns(ctx.now);
+            self.update_senses(ns);
+        }
         true
+    }
+
+    /// TIM16's kernel clock: PCLK2, doubled when the APB2 prescaler divides (RM0434 RCC, timer
+    /// clocks; CFGR.PPRE2 bits 13:11, 0xx = not divided).
+    fn tim16_clock(&self) -> u32 {
+        let enabled = self.rcc.regs.get(rcc::APB2ENR) & rcc::APB2_TIM16 != 0;
+        let divided = (self.rcc.regs.get(rcc::CFGR) >> 11) & 4 != 0;
+        match (enabled, divided) {
+            (false, _) => 0,
+            (true, false) => self.clocks.pclk2,
+            (true, true) => self.clocks.pclk2.saturating_mul(2),
+        }
+    }
+
+    /// Speaker and vibration motor outputs at virtual time `ns`.
+    fn update_senses(&mut self, ns: u128) {
+        use crate::board::{SPEAKER, VIBRO};
+        let (sp, spin) = SPEAKER;
+        let g = &self.gpio[sp].regs;
+        // The pin must be in alternate function mode (MODER 10) with AF14, TIM16_CH1 (AFRH for pins 8–15).
+        let af = (g.get(gpio::MODER) >> (2 * spin)) & 3 == 2 && (g.get(gpio::AFRH) >> (4 * (spin - 8))) & 0xF == 14;
+        let tone = if af { self.tim16.tone(self.tim16_clock()) } else { None };
+        let (vp, vpin) = VIBRO;
+        let vibro = self.gpio[vp].driven_high(vpin);
+        self.senses.update(ns, tone, vibro);
     }
 
     /// Hardware fidelity table (BRIEF §5.4 "status registry").
@@ -800,6 +850,12 @@ impl Periphs {
                 "unlock, page erase, 64-bit and fast programming, option bytes; instant; no sector protection",
             ),
             ("Buttons", Emulated, "six keys with the board's polarity and pulls"),
+            (
+                "Speaker (TIM16 on PB8)",
+                Partial,
+                "tone and duty cycle from the timer, played as a square wave; no counter, no timer interrupts",
+            ),
+            ("Vibration motor (PA8)", Emulated, "on/off from the pin"),
             (
                 "Battery (BQ27220, BQ25896)",
                 Simulated,

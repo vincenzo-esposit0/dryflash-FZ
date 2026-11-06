@@ -318,6 +318,11 @@ impl Machine {
         self.bus.periphs.lights(self.cpu.cycles)
     }
 
+    /// Speaker and vibration motor changes since the last call, with their virtual times.
+    pub fn take_senses(&mut self) -> Vec<crate::board::senses::SenseEvent> {
+        self.bus.periphs.senses.take()
+    }
+
     pub fn digest(&self) -> &Digest {
         &self.bus.digest
     }
