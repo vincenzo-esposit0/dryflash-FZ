@@ -10,6 +10,8 @@ export const LATENCY_MS = 120;
 const DRIFT_MS = 4 * LATENCY_MS;
 /** Loudest output: a square wave is harsh, and the real speaker is small. */
 const MASTER = 0.15;
+/** How long to wait for the audio device: without one, a browser may never answer. */
+const RESUME_MS = 2000;
 
 /** Lines virtual time up with the audio clock. */
 export class Timeline {
@@ -56,7 +58,7 @@ export class Speaker {
       osc.start();
       [this.ctx, this.osc, this.gain] = [ctx, osc, gain];
     }
-    await this.ctx.resume();
+    await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, RESUME_MS))]);
     return this.ctx.state === "running";
   }
 

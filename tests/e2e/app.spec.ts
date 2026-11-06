@@ -201,8 +201,13 @@ test.describe("with a firmware", () => {
   // Settings → LCD and Notifications: changing Volume plays C5, switching Vibro on vibrates (notification_settings_app.c).
   test("the firmware's own beep plays through WebAudio, and its buzz shows", async ({ page }) => {
     await page.addInitScript(() => {
-      const w = window as unknown as { __audio: [string, number][] };
+      const w = window as unknown as { __audio: [string, number][]; __audioState?: string };
       w.__audio = [];
+      const resume = AudioContext.prototype.resume;
+      AudioContext.prototype.resume = async function () {
+        await resume.call(this);
+        w.__audioState = this.state;
+      };
       const set = AudioParam.prototype.setValueAtTime;
       AudioParam.prototype.setValueAtTime = function (value: number, time: number) {
         w.__audio.push([this.defaultValue === 440 ? "hz" : "gain", value]); // an oscillator's frequency starts at 440
@@ -225,9 +230,19 @@ test.describe("with a firmware", () => {
     // 524.59 Hz: the firmware rounds C5 to whole timer ticks.
     await expect(events).toContainText("Speaker 525 Hz");
     await expect(events).toContainText("Speaker silent");
-    const audio = await page.evaluate(() => (window as unknown as { __audio: [string, number][] }).__audio);
-    expect(audio.some(([p, v]) => p === "hz" && Math.abs(v - 524.59) < 0.1)).toBe(true);
-    expect(audio.some(([p, v]) => p === "gain" && v > 0)).toBe(true);
+    const { audio, state } = await page.evaluate(() => {
+      const w = window as unknown as { __audio: [string, number][]; __audioState?: string };
+      return { audio: w.__audio, state: w.__audioState ?? "no answer" };
+    });
+    if (state === "running") {
+      expect(audio.some(([p, v]) => p === "hz" && Math.abs(v - 524.59) < 0.1)).toBe(true);
+      expect(audio.some(([p, v]) => p === "gain" && v > 0)).toBe(true);
+    } else {
+      // A machine with no audio device (Firefox on the CI runners): the page must say so, not pretend.
+      console.log(`AudioContext ${state}: no sound on this machine`);
+      await expect(page.getByRole("alert")).toContainText("This browser cannot play sound.");
+      await expect(page.getByRole("checkbox", { name: "Sound" })).not.toBeChecked();
+    }
 
     for (const key of ["ArrowDown", "ArrowLeft", "ArrowRight"]) await step(key);
     await expect(events).toContainText("Vibration on");
