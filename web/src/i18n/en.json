@@ -78,8 +78,8 @@
   "battery": "Battery",
   "batteryCharge": "Charge",
   "charging": "Charging",
-  "usb": "USB plugged in",
-  "applyNext": "Name, region, colour and sleep method apply at the next power cycle. Battery applies at once.",
+  "usb": "USB",
+  "applyNext": "Name, region, colour and sleep method apply at the next power cycle.",
   "firmwarePanel": "Install firmware",
   "screenshot": "Screenshot",
   "recordWebm": "Record video",
@@ -188,5 +188,13 @@
   "vibroOn": "Vibration on",
   "vibroOff": "Vibration off",
   "toneEvent": "Speaker {hz} Hz",
-  "toneOff": "Speaker silent"
+  "toneOff": "Speaker silent",
+  "usbNote": "A USB cable to a computer: the charger charges, and plugging it into a device that is off turns it on. No USB data yet.",
+  "charged": "Charged",
+  "onBattery": "On battery",
+  "poweredOff": "Off",
+  "powerOn": "Power on",
+  "powerOnNote": "A power-on reset, as when the device is switched on again.",
+  "powerOffEvent": "Power off (the charger cut the battery off)",
+  "powerOnEvent": "Power on"
 }

@@ -68,7 +68,8 @@ pub mod senses;
 pub mod st25r3916;
 pub mod st7567;
 
-/// Battery state shown by the fuel gauge and charger (UI controls in M7).
+/// Battery state shown by the fuel gauge and charger. The page sets the charge and whether USB is
+/// plugged in; whether it charges is the charger's to decide (`Periphs::sync_power`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Battery {
     pub state_of_charge: u8,
@@ -77,6 +78,26 @@ pub struct Battery {
     pub temperature_c: f32,
     pub charging: bool,
     pub usb_connected: bool,
+}
+
+impl Battery {
+    /// Current into the battery while the charger is in fast charge, and the system's draw from
+    /// it otherwise. Plausible values for display; no charging physics is simulated.
+    pub const CHARGE_MA: i16 = 500;
+    pub const DRAW_MA: i16 = -50;
+
+    /// A battery at `percent`, with USB plugged in or not.
+    pub fn at(percent: u8, usb_connected: bool) -> Self {
+        let percent = percent.min(100);
+        Battery {
+            state_of_charge: percent,
+            // A plausible Li-ion curve from the firmware's EDV0 (3300 mV,
+            // targets/f7/furi_hal/furi_hal_power_config.c) up; nothing depends on its shape.
+            voltage_mv: 3300 + percent as u16 * 9,
+            usb_connected,
+            ..Battery::default()
+        }
+    }
 }
 
 impl Default for Battery {

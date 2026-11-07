@@ -26,6 +26,9 @@ pub mod svd;
 pub mod tim16;
 pub mod usart;
 
+use crate::board::Battery;
+use crate::board::bq25896::{Bq25896, ChargeState};
+use crate::board::bq27220::Bq27220;
 use crate::cpu::Size;
 use crate::trace::digest::Digest;
 use regfile::{PeriphDesc, RegFile};
@@ -394,6 +397,61 @@ impl Periphs {
         self.gpio_changed();
     }
 
+    /// The page's battery: charge in percent and whether USB is plugged in. Plugging it in takes the
+    /// charger out of ship mode (SLUSC76C §9.2.10.2), which `Machine` turns into a power-on.
+    pub fn set_battery(&mut self, percent: u8, usb: bool) {
+        let i2c = &mut self.i2c[0];
+        if let Some(c) = i2c.device_mut::<Bq25896>() {
+            let plugged = usb && !c.battery.usb_connected;
+            c.battery = Battery::at(percent, usb);
+            if plugged {
+                c.exit_ship_mode();
+            }
+        }
+        self.sync_power();
+    }
+
+    /// The charger decides whether the battery charges; the fuel gauge reports the same.
+    fn sync_power(&mut self) {
+        let i2c = &mut self.i2c[0];
+        let Some(c) = i2c.device_mut::<Bq25896>() else { return };
+        let state = c.charge_state();
+        c.battery.charging = state != ChargeState::No;
+        c.battery.current_ma = match state {
+            ChargeState::Fast => Battery::CHARGE_MA,
+            ChargeState::Done => 0,
+            ChargeState::No => Battery::DRAW_MA,
+        };
+        let b = c.battery;
+        if let Some(g) = i2c.device_mut::<Bq27220>() {
+            g.battery = b;
+        }
+    }
+
+    /// Whether the charger charges the battery (fast charge or termination).
+    pub fn charging(&mut self) -> bool {
+        self.i2c[0]
+            .device_mut::<Bq25896>()
+            .is_some_and(|c| c.charge_state() != ChargeState::No)
+    }
+
+    /// The charger has cut the battery off and nothing else powers the system.
+    pub fn power_cut(&mut self) -> bool {
+        self.i2c[0].device_mut::<Bq25896>().is_some_and(|c| c.power_cut())
+    }
+
+    /// The charger's BATFET_DIS is set: the firmware has asked it to power off.
+    pub fn ship_mode(&mut self) -> bool {
+        self.i2c[0].device_mut::<Bq25896>().is_some_and(|c| c.ship_mode())
+    }
+
+    /// Power comes back (USB plugged in, or the power button): BATFET on again.
+    pub fn exit_ship_mode(&mut self) {
+        if let Some(c) = self.i2c[0].device_mut::<Bq25896>() {
+            c.exit_ship_mode();
+        }
+    }
+
     /// LED and backlight levels at virtual time `now` (cycles).
     pub fn lights(&mut self, now: u64) -> crate::board::lp5562::Lights {
         let ns = self.now_ns(now);
@@ -719,6 +777,9 @@ impl Periphs {
                 self.i2c[i].set_time(ns);
                 let h = self.i2c[i].write(word_off, value);
                 self.irq_dirty = true;
+                if i == 0 {
+                    self.sync_power(); // CHG_CONFIG may have changed
+                }
                 h
             }
             Slot::Tim16 => self.tim16.write(word_off, value),
@@ -859,7 +920,7 @@ impl Periphs {
             (
                 "Battery (BQ27220, BQ25896)",
                 Simulated,
-                "fixed virtual battery state; data memory provisioning",
+                "charge and USB set by the page; charging, ADC readings and power-off (ship mode) from the charger's registers; no charging physics",
             ),
             (
                 "CPU2 (radio core)",

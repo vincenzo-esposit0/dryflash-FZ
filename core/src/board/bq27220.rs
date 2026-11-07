@@ -96,7 +96,9 @@ impl Bq27220 {
             0x00 => 0,                                          // CONTROL_STATUS: BATT_ID 0
             0x06 => ((b.temperature_c + 273.15) * 10.0) as u16, // 0.1 K
             0x08 => b.voltage_mv,
-            0x0A => (1 << 3) | (!b.charging as u16), // BATTPRES, DSG
+            // BatteryStatus (lib/drivers/bq27220.h): DSG, SYSDWN, BATTPRES. The real gauge raises
+            // SYSDWN below a data-memory voltage the firmware does not set; here it is 0 %.
+            0x0A => (1 << 3) | (!b.charging as u16) | ((b.state_of_charge == 0) as u16) << 1,
             0x0C | 0x14 => b.current_ma as u16,
             0x10 => (fcc as u32 * b.state_of_charge as u32 / 100) as u16,
             0x12 | 0x3C => fcc,

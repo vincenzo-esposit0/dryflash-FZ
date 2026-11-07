@@ -3,12 +3,10 @@
 //! Node runner drive. Values cross the boundary as numbers, byte arrays and JSON strings
 //! (no serde dependency); 64-bit counters are returned as `f64` (exact below 2^53).
 
-use dryflash_core::board::bq25896::Bq25896;
-use dryflash_core::board::bq27220::Bq27220;
+use dryflash_core::board::Button;
 use dryflash_core::board::fat32::{self, Volume};
 use dryflash_core::board::otp::BoardInfo;
 use dryflash_core::board::sdcard::{BLOCK_SIZE, BlockStore, SdCard};
-use dryflash_core::board::{Battery, Button};
 use dryflash_core::bus::Fidelity;
 use dryflash_core::crash::{FirmwareInfo, Report, json_str};
 use dryflash_core::loader::dfu;
@@ -63,7 +61,8 @@ pub struct Emulator {
     /// Virtual-device settings, applied to each new machine.
     board: BoardInfo,
     uid64: u64,
-    battery: Battery,
+    /// The page's battery: charge in percent, USB plugged in.
+    battery: (u8, bool),
     /// USART1 bytes already handed to the host.
     log_read: usize,
     /// Description of the last non-budget exit.
@@ -81,7 +80,7 @@ impl Emulator {
         m.bus.periphs.flash.ob = self.m.bus.periphs.flash.ob;
         m.bus.provision_otp(&self.board);
         m.bus.set_uid64(self.uid64);
-        apply_battery(&mut m, &self.battery);
+        m.bus.periphs.set_battery(self.battery.0, self.battery.1);
         m.set_crash_entries(&crash_entries(self.symbols.as_ref()));
         if let Some(old) = self.m.bus.periphs.remove_sd() {
             let mut card = SdCard::new(old.capacity_blocks(), BlockStore::default());
@@ -104,17 +103,6 @@ fn crash_entries(symbols: Option<&Symbols>) -> Vec<u32> {
         .collect()
 }
 
-/// The same battery state for the fuel gauge and the charger.
-fn apply_battery(m: &mut Machine, b: &Battery) {
-    let i2c = &mut m.bus.periphs.i2c[0];
-    if let Some(g) = i2c.device_mut::<Bq27220>() {
-        g.battery = *b;
-    }
-    if let Some(c) = i2c.device_mut::<Bq25896>() {
-        c.battery = *b;
-    }
-}
-
 impl Default for Emulator {
     fn default() -> Self {
         Self::new()
@@ -132,7 +120,7 @@ impl Emulator {
             firmware: FirmwareInfo::default(),
             board: BoardInfo::default(),
             uid64: 0,
-            battery: Battery::default(),
+            battery: (80, false),
             log_read: 0,
             last_stop: String::new(),
         }
@@ -334,16 +322,23 @@ impl Emulator {
         self.uid64 = (high as u64) << 32 | low as u64;
     }
 
-    /// Simulated battery, effective at once: charge in percent, charging, USB plugged in.
-    pub fn set_battery(&mut self, percent: u8, charging: bool, usb: bool) {
-        let percent = percent.min(100);
-        self.battery.state_of_charge = percent;
-        // A plausible Li-ion curve for display; nothing in the firmware depends on its shape.
-        self.battery.voltage_mv = 3300 + percent as u16 * 9;
-        self.battery.current_ma = if charging { 500 } else { -50 };
-        self.battery.charging = charging;
-        self.battery.usb_connected = usb;
-        apply_battery(&mut self.m, &self.battery);
+    /// Simulated battery, effective at once: charge in percent, USB plugged in. Whether it
+    /// charges is up to the charger and the firmware. Plugging USB into a device that is off
+    /// turns it on.
+    pub fn set_battery(&mut self, percent: u8, usb: bool) {
+        self.battery = (percent.min(100), usb);
+        self.m.set_battery(percent, usb);
+    }
+
+    /// The firmware turned the battery off (Power → Power off, or a flat battery) and USB is not
+    /// plugged in: nothing runs until it is, or until `power_on`.
+    pub fn powered_off(&self) -> bool {
+        self.m.is_off()
+    }
+
+    /// Whether the charger charges the battery now (USB plugged in, charging not suppressed).
+    pub fn charging(&mut self) -> bool {
+        self.m.charging()
     }
 
     /// The flash contents up to the last programmed byte.
@@ -661,13 +656,16 @@ mod tests {
         e.set_board("Bob", 1, 2).unwrap();
         assert!(e.set_board("far too long", 1, 2).is_err());
         e.set_uid64(0x0011_2233, 0x4455_6677);
-        e.set_battery(42, true, true);
+        e.set_battery(42, true);
         let mut m = e.fresh_machine();
         assert_eq!(&m.bus.otp[24..27], b"Bob");
         assert_eq!(m.bus.otp[17], 1);
         let uid = m.bus.engi[(dryflash_core::bus::map::UID64_ADDR - dryflash_core::bus::map::ENGI_BASE) as usize];
         assert_eq!(uid, 0x77);
-        let g = m.bus.periphs.i2c[0].device_mut::<Bq27220>().unwrap();
+        // USB in: the charger charges, and the gauge says so.
+        let g = m.bus.periphs.i2c[0]
+            .device_mut::<dryflash_core::board::bq27220::Bq27220>()
+            .unwrap();
         assert_eq!((g.battery.state_of_charge, g.battery.charging), (42, true));
     }
 

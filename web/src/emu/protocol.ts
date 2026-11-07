@@ -6,7 +6,7 @@ import type { Persistence } from "./cardstore";
 import type { BatterySettings, BoardSettings, DeviceMeta } from "./devices";
 import type { SenseChange } from "./senses";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Button indices understood by the core (core-wasm `set_button`). */
 export const BUTTONS = ["up", "down", "left", "right", "ok", "back"] as const;
@@ -87,6 +87,10 @@ export interface Status {
   mips: number;
   resets: number;
   cardUsedBytes: number;
+  /** The firmware powered off (charger ship mode) and USB is not plugged in. */
+  off: boolean;
+  /** The charger charges the battery. */
+  charging: boolean;
 }
 
 export type FromWorker =

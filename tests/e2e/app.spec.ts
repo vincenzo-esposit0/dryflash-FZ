@@ -250,6 +250,41 @@ test.describe("with a firmware", () => {
     await expect(page.locator(".device.buzz")).toHaveCount(0);
   });
 
+  test("USB charges with the firmware's red LED, and Power OFF turns the device off until USB comes back", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    const battery = page.getByRole("group", { name: "Battery" });
+    const usb = battery.getByRole("checkbox", { name: "USB" });
+    await expect(battery.getByRole("status")).toHaveText("On battery");
+    await usb.check();
+    await expect(battery.getByRole("status")).toHaveText("Charging");
+    // The power service's sequence_charging: red at full, green off.
+    await expect(page.locator(".events")).toContainText(/LED R[1-9]\d* G0 B0/);
+    await usb.uncheck();
+    await expect(battery.getByRole("status")).toHaveText("On battery");
+
+    await page.locator("footer p").first().click(); // keys to the device, not the checkbox
+    const step = async (key: string, ms = 700) => {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(ms);
+    };
+    // Popup, menu, Settings, Power (fourth), Power OFF (third), the dialog's "Power Off".
+    for (const key of ["Escape", "Enter", "ArrowUp", "ArrowUp", "Enter"]) await step(key);
+    for (let i = 0; i < 3; i++) await step("ArrowDown", 400);
+    await step("Enter");
+    for (let i = 0; i < 2; i++) await step("ArrowDown", 400);
+    await step("Enter");
+    await step("ArrowRight");
+    await expect(battery.getByRole("status")).toHaveText("Off");
+    await expect(page.locator(".meter")).toContainText("Off");
+    await expect.poll(() => darkPixels(page)).toBe(0);
+    await expect(page.locator(".events")).toContainText("Power off");
+
+    await usb.check(); // plugging in powers the charger's system rail back up
+    await expect(battery.getByRole("status")).toHaveText("Charging");
+    await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
+  });
+
   test("a device exports and imports as a new one with its firmware", async ({ page }) => {
     await install(page);
     await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);

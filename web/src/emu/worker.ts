@@ -170,7 +170,20 @@ function publish(force: boolean) {
     const speed = report.wall && dt > 0 ? (v - report.virtualMs) / dt : 0;
     const mips = report.wall && dt > 0 ? (n - report.instructions) / dt / 1000 : 0;
     report = { wall: now, virtualMs: v, instructions: n };
-    post({ type: "status", status: { running, turbo, virtualMs: v, speed, mips, resets: e.resets(), cardUsedBytes: e.sd_used_bytes() } });
+    post({
+      type: "status",
+      status: {
+        running,
+        turbo,
+        virtualMs: v,
+        speed,
+        mips,
+        resets: e.resets(),
+        cardUsedBytes: e.sd_used_bytes(),
+        off: e.powered_off(),
+        charging: e.charging(),
+      },
+    });
   }
 }
 
@@ -208,7 +221,7 @@ function applySettings(e: Emulator, d: DeviceMeta) {
   e.set_legacy_sleep(d.legacySleep);
   e.set_board(d.board.name, d.board.region, d.board.color);
   e.set_uid64(parseInt(d.uid.slice(0, 8), 16), parseInt(d.uid.slice(8), 16));
-  e.set_battery(d.battery.percent, d.battery.charging, d.battery.usb);
+  e.set_battery(d.battery.percent, d.battery.usb);
 }
 
 async function reportDevices() {

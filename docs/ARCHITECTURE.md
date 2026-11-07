@@ -206,7 +206,7 @@ Initial fidelity targets:
 | ST7567 LCD | Emulated (command set used by `u8g2`/firmware, 1-bit framebuffer, contrast, inversion) | M3 |
 | Buttons (Up/Down/Left/Right/OK/Back) | Emulated (active levels per `furi_hal_resources`) | M3 |
 | LP5562 LED + backlight | Emulated | M3 |
-| BQ27220 / BQ25896 | Partial (plausible register set, UI controls) | M2 init, M7 UI |
+| BQ27220 / BQ25896 | Simulated (charge and USB from the page; charging, ADC readings and ship-mode power-off from the charger's registers; ADR-0019, M7 checkpoint 2) | M2 init, M7 UI |
 | microSD (SPI mode) | Emulated (CMD0/8/55/41/58/9/10/12/13/17/18/24/25, CRC optional) | M4 |
 | CC1101 | Stubbed (register file + strobes, no RX signal) → Partial in M8 | M2 init |
 | ST25R3916 | Stubbed (init + "no tag") → Partial in M8 | M2 init |

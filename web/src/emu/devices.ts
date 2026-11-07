@@ -14,9 +14,9 @@ export interface BoardSettings {
   color: number;
 }
 
+/** The page's battery. Whether it charges is the charger's to decide (USB in, not suppressed). */
 export interface BatterySettings {
   percent: number;
-  charging: boolean;
   usb: boolean;
 }
 
@@ -66,7 +66,7 @@ export function newDevice(label: string, id: string, uid = newUid()): DeviceMeta
     label,
     legacySleep: true,
     board: { name: "dryflash", region: 4, color: 2 },
-    battery: { percent: 80, charging: false, usb: false },
+    battery: { percent: 80, usb: false },
     uid,
     firmware: null,
   };

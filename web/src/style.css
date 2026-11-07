@@ -140,8 +140,9 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-basis: 100%; padding-top: 6px; border-top: 1px solid var(--line); }
-.group > span { flex-basis: 100%; color: var(--dim); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.group > span:first-child { flex-basis: 100%; color: var(--dim); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
 .group button { min-height: 34px; padding: 4px 10px; }
+.group .state { font-size: 0.875rem; padding: 0 4px; color: var(--dim); }
 .group label { display: inline-flex; align-items: center; gap: 4px; min-height: 34px; padding: 0 4px; font-size: 0.875rem; }
 @media (pointer: coarse) { .group button, .group label { min-height: 44px; } }
 

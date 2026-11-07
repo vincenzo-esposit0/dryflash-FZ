@@ -165,6 +165,10 @@ pub struct Machine {
     log_seen: usize,
     /// The stubbed chips on SPI1: bytes seen so far, and the cycle counter when that last moved.
     stubs: [(u64, u64); 2],
+    /// The charger cut the battery off with no USB to power the system (ship mode): nothing runs.
+    off: bool,
+    /// Bumped when power goes or comes back, so the display reads as changed.
+    power_changes: u64,
 }
 
 impl Default for Machine {
@@ -200,6 +204,8 @@ impl Machine {
             entry_snapshot: None,
             log_seen: 0,
             stubs: [(0, 0); 2],
+            off: false,
+            power_changes: 0,
         }
     }
 
@@ -254,7 +260,46 @@ impl Machine {
         self.inputs.clear();
         self.entry_snapshot = None;
         self.log_seen = self.bus.periphs.usart[0].tx.len();
+        // Power is there, so the charger's BATFET is on (SLUSC76C §9.2.10.2).
+        self.bus.periphs.exit_ship_mode();
+        if self.off {
+            self.off = false;
+            self.power_changes += 1;
+        }
         self.reset_cpu("power-on reset");
+    }
+
+    /// Whether the charger charges the battery now.
+    pub fn charging(&mut self) -> bool {
+        self.bus.periphs.charging()
+    }
+
+    /// The system has no power: the firmware turned the battery off and USB is not plugged in.
+    pub fn is_off(&self) -> bool {
+        self.off
+    }
+
+    /// The page's battery: charge in percent and USB. Plugging USB into a device that is off
+    /// powers it up, as on the real charger.
+    pub fn set_battery(&mut self, percent: u8, usb: bool) {
+        self.bus.periphs.set_battery(percent, usb);
+        if self.off && !self.bus.periphs.power_cut() {
+            self.power_on();
+        } else if !self.off && self.bus.periphs.power_cut() {
+            self.power_off();
+        }
+    }
+
+    /// Power is gone. The LCD and LEDs go dark; RAM is lost (cleared at the next power-on).
+    fn power_off(&mut self) {
+        self.off = true;
+        self.power_changes += 1;
+        let ns = self.bus.periphs.now_ns(self.cpu.cycles);
+        self.bus.periphs.senses.update(ns, None, false);
+        self.bus.digest.event(
+            self.cpu.cycles,
+            "power off: charger BATFET off (ship mode), no USB".to_string(),
+        );
     }
 
     fn reset_cpu(&mut self, why: &str) {
@@ -303,18 +348,25 @@ impl Machine {
         self.cpu.watch.sort_unstable();
     }
 
-    /// The visible 128×64 LCD image (1 byte per pixel, 1 = dark).
+    /// The visible 128×64 LCD image (1 byte per pixel, 1 = dark); blank without power.
     pub fn display_frame(&self) -> Vec<u8> {
-        self.bus.periphs.display.frame()
+        let mut f = self.bus.periphs.display.frame();
+        if self.off {
+            f.fill(0);
+        }
+        f
     }
 
     /// Changes whenever the LCD content changes.
     pub fn display_generation(&self) -> u64 {
-        self.bus.periphs.display.generation
+        self.bus.periphs.display.generation.wrapping_add(self.power_changes)
     }
 
-    /// LED and backlight levels now.
+    /// LED and backlight levels now; all off without power.
     pub fn lights(&mut self) -> crate::board::lp5562::Lights {
+        if self.off {
+            return Default::default();
+        }
         self.bus.periphs.lights(self.cpu.cycles)
     }
 
@@ -330,6 +382,10 @@ impl Machine {
     /// Runs for up to `cycles` of virtual time.
     pub fn run(&mut self, cycles: u64) -> RunExit {
         let end = self.cpu.cycles + cycles;
+        if self.off {
+            self.cpu.cycles = end; // time passes for the page; nothing runs
+            return RunExit::Budget;
+        }
         let exit = loop {
             let budget = end.saturating_sub(self.cpu.cycles);
             if budget == 0 {
@@ -356,8 +412,22 @@ impl Machine {
                     *stub = (accesses, self.cpu.cycles);
                 }
             }
+            if self.bus.periphs.power_cut() {
+                self.power_off();
+                self.cpu.cycles = end;
+                break RunExit::Budget;
+            }
             // Without a reset for it to end in, a firmware built to halt stops here.
             if let Some(record) = self.halted_record() {
+                // Powering off with USB plugged in: the charger keeps the system up, so the firmware
+                // halts on "Disconnect USB for safe shutdown" (power.c `power_handle_shutdown`).
+                if self.bus.periphs.ship_mode() {
+                    self.bus.digest.event(
+                        self.cpu.cycles,
+                        "halted in ship mode: waiting for USB to be unplugged".to_string(),
+                    );
+                    continue;
+                }
                 self.capture(CrashKind::Halted, Some(record));
                 break RunExit::Crashed;
             }
@@ -373,7 +443,8 @@ impl Machine {
             }
             match stop {
                 Stop::Budget => {
-                    if self.check_hang() {
+                    // Halted for power-off with USB in is a wait, not a hang.
+                    if !self.bus.periphs.ship_mode() && self.check_hang() {
                         break RunExit::Hung;
                     }
                 }
@@ -398,6 +469,11 @@ impl Machine {
                                 break RunExit::Budget;
                             }
                             self.cpu.cycles = t;
+                        }
+                        // Halted for power-off with USB in: waiting for the cable to come out.
+                        None if self.bus.periphs.ship_mode() => {
+                            self.cpu.cycles = end;
+                            break RunExit::Budget;
                         }
                         None => {
                             self.capture(CrashKind::IdleForever { pc }, None);

@@ -886,3 +886,29 @@ The firmware's own sounds and buzzes now reach the page. Both are driven from th
 
 Demo: pick a firmware, tick **Sound**, then on the device go to Settings → LCD and Notifications, move to Volume and press Left; then to
 Vibro and switch it off and on.
+
+### Checkpoint 2 — battery, USB and power-off
+
+The battery controls existed since M5, but the charger answered zeros and the page could claim "charging" with no cable. Now the
+page sets what a person controls, a USB cable and the charge, and the firmware sees what TI's charger would report (ADR-0019).
+
+- **Charger (BQ25896).** Reset values, the status register, the ADC registers and ship mode follow TI's datasheet SLUSC76C (§9.4,
+  §9.2.10), found and read this time; until now the model said the datasheet was not available. Charging is computed from USB,
+  CHG_CONFIG and the charge, so charging stops when the firmware clears CHG_CONFIG (Sub-GHz does; unit-tested on the register,
+  not tried through Sub-GHz). VBUS, battery and system voltage, charge
+  current and the TS reading come from the battery state with the datasheet's scales. **Simulated**: no charging physics.
+- **Gauge (BQ27220)** reports the charger's decision (DSG, current) and raises SYSDWN at 0 %, an emulator choice: the real
+  threshold is in data memory the firmware leaves at the chip's default, which is not known here.
+- **Power-off.** Power → Power OFF sets BATFET_DIS. Without USB the device is off: nothing runs, the LCD, backlight and LEDs are dark.
+  With USB in, the firmware shows "It's now safe to unplug the USB cable" and halts. This used to be reported as a crash; it no longer
+  is, and unplugging then turns the device off. Plugging USB in, or **Power on** on the page, starts it again.
+- **Page.** A Battery group in the toolbar: USB, charge, and what the charger does (On battery, Charging, Charged, Off), with Power on
+  when off. Power-off and power-on appear in the Events panel. The battery is no longer in the device settings.
+- **Checked on the official firmware** in `core/tests/power_official.rs`: USB lights the LED red, 100 % turns it green, unplugging turns
+  it off; Power OFF without USB turns the device off and USB brings it back to the Desktop; with USB it waits on the unplug screen, not
+  a crash; a flat battery shows the firmware's 90 s countdown, then the device is off. E2E on Chromium: USB → "Charging" and a red LED,
+  Power OFF from the menu → blank LCD and "Off", USB → it boots again. By hand in the browser: the same, plus Power on.
+- **Not tested:** other firmwares' power paths; Firefox (CI runs it); a battery that drains or charges over time, which is not modelled.
+
+Demo: pick a firmware, tick **USB** in the Battery group (the LED turns red, the status bar shows the charging bolt), then go to Settings →
+Power → Power OFF → Power Off. Untick USB: the device is off. Tick it again, or press **Power on**.
