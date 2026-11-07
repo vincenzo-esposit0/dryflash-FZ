@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { Persistence } from "./emu/cardstore";
-import type { DeviceMeta } from "./emu/devices";
+import type { BatterySettings, DeviceMeta } from "./emu/devices";
 import type {
   ButtonName,
   CardEntry,
@@ -269,9 +269,48 @@ function DeviceView({
   );
 }
 
+/** USB cable and charge, in effect at once and kept with the device; and what the charger does. */
+function BatteryControls({ battery, status, send }: { battery: BatterySettings; status: Status | null; send: Send }) {
+  const set = (b: Partial<BatterySettings>) => send({ type: "settings", battery: { ...battery, ...b } });
+  const state = status?.off
+    ? tr("poweredOff")
+    : status?.charging
+      ? battery.percent >= 100
+        ? tr("charged")
+        : tr("charging")
+      : tr("onBattery");
+  return (
+    <div class="group" role="group" aria-label={tr("battery")}>
+      <span aria-hidden="true">{tr("battery")}</span>
+      <label title={tr("usbNote")}>
+        <input type="checkbox" checked={battery.usb} onChange={(e) => set({ usb: (e.currentTarget as HTMLInputElement).checked })} />{" "}
+        {tr("usb")}
+      </label>
+      <label>
+        {tr("batteryCharge")}{" "}
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={battery.percent}
+          onChange={(e) => set({ percent: +(e.currentTarget as HTMLInputElement).value })}
+        />{" "}
+        <span>{battery.percent}%</span>
+      </label>
+      <span class="state" role="status">
+        {state}
+      </span>
+      {status?.off && (
+        <button type="button" title={tr("powerOnNote")} onClick={() => send({ type: "control", action: "reset" })}>
+          {tr("powerOn")}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function DeviceSettings({ device, send }: { device: DeviceMeta; send: Send }) {
   const board = device.board;
-  const battery = device.battery;
   const options = (prefix: "region", values: number[]) =>
     values.map((v) => <option value={v}>{tr(`${prefix}${v}` as Key)}</option>);
   const value = (e: Event) => (e.currentTarget as HTMLInputElement).value;
@@ -305,24 +344,6 @@ function DeviceSettings({ device, send }: { device: DeviceMeta; send: Send }) {
           {tr("legacySleep")}
         </label>
         <p class="hint">{tr("legacySleepNote")}</p>
-        <label>
-          {tr("batteryCharge")} {battery.percent}%{" "}
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={battery.percent}
-            onChange={(e) => send({ type: "settings", battery: { ...battery, percent: +value(e) } })}
-          />
-        </label>
-        <label>
-          <input type="checkbox" checked={battery.charging} onChange={(e) => send({ type: "settings", battery: { ...battery, charging: checked(e) } })} />{" "}
-          {tr("charging")}
-        </label>
-        <label>
-          <input type="checkbox" checked={battery.usb} onChange={(e) => send({ type: "settings", battery: { ...battery, usb: checked(e) } })} />{" "}
-          {tr("usb")}
-        </label>
         <p class="hint">{tr("applyNext")}</p>
       </div>
     </details>
@@ -646,6 +667,8 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [sound, setSound] = useState(false);
   /** Sound plays only at 1×: paused or in Turbo, virtual time and wall time part. */
   const audible = useRef(false);
+  /** Whether the last status said the device had no power, to log the change once. */
+  const wasOff = useRef(false);
   const [buzzing, setBuzzing] = useState(false);
   const buzzUntil = useRef(0);
   const buzzTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -862,6 +885,11 @@ export function App({ embed = false }: { embed?: boolean }) {
           break;
         }
         case "status":
+          if (m.status.off !== wasOff.current) {
+            const off = m.status.off;
+            wasOff.current = off;
+            setEvents((list) => [`${new Date().toLocaleTimeString()} ${tr(off ? "powerOffEvent" : "powerOnEvent")}`, ...list].slice(0, EVENT_LIMIT));
+          }
           setStatus(m.status);
           audible.current = m.status.running && !m.status.turbo;
           if (!audible.current) speaker.silence();
@@ -1266,8 +1294,8 @@ export function App({ embed = false }: { embed?: boolean }) {
             {hasFirmware ? (
               <div class="console">
             {status && (
-              <p class={running ? "meter" : "meter halted"}>
-                <strong>{running ? tr("running") : tr("paused")}</strong> · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
+              <p class={running && !status.off ? "meter" : "meter halted"}>
+                <strong>{status.off ? tr("poweredOff") : running ? tr("running") : tr("paused")}</strong> · {tr("virtualTime")} {(status.virtualMs / 1000).toFixed(1)} s ·{" "}
                 {tr("speed")} {status.speed.toFixed(2)}× · {status.mips.toFixed(0)} MIPS
               </p>
             )}
@@ -1301,6 +1329,7 @@ export function App({ embed = false }: { embed?: boolean }) {
                     {tr("turbo")}
                   </label>
                 </div>
+                {active && <BatteryControls battery={active.battery} status={status} send={send} />}
                 <div class="group" role="group" aria-label={tr("groupCapture")}>
                   <span aria-hidden="true">{tr("groupCapture")}</span>
                   <button type="button" onClick={screenshot}>

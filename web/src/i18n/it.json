@@ -78,8 +78,8 @@
   "battery": "Batteria",
   "batteryCharge": "Carica",
   "charging": "In carica",
-  "usb": "USB collegato",
-  "applyNext": "Nome, regione, colore e metodo di sospensione valgono dalla prossima riaccensione. La batteria vale subito.",
+  "usb": "USB",
+  "applyNext": "Nome, regione, colore e metodo di sospensione valgono dalla prossima riaccensione.",
   "firmwarePanel": "Installa un firmware",
   "screenshot": "Screenshot",
   "recordWebm": "Registra video",
@@ -188,5 +188,13 @@
   "vibroOn": "Vibrazione accesa",
   "vibroOff": "Vibrazione spenta",
   "toneEvent": "Altoparlante {hz} Hz",
-  "toneOff": "Altoparlante muto"
+  "toneOff": "Altoparlante muto",
+  "usbNote": "Un cavo USB verso un computer: il caricatore carica, e collegarlo a un dispositivo spento lo accende. Ancora nessun dato via USB.",
+  "charged": "Carica completa",
+  "onBattery": "A batteria",
+  "poweredOff": "Spento",
+  "powerOn": "Accendi",
+  "powerOnNote": "Un reset all'accensione, come quando si riaccende il dispositivo.",
+  "powerOffEvent": "Spento (il caricatore ha staccato la batteria)",
+  "powerOnEvent": "Acceso"
 }

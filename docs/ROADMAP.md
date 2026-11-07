@@ -101,7 +101,8 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
 
 - ☑ Speaker (TIM16 channel 1 on PB8) → WebAudio, muted by default; vibration motor (PA8) → shake on the page,
   `navigator.vibrate` on phones; both in the Events panel (checkpoint 1)
-- ☐ LED, battery/USB controls: what M2–M5 left to finish
+- ☑ Battery/USB controls (checkpoint 2, ADR-0019): USB and charge in the toolbar; charging, ADC readings and power-off
+  from the charger's registers; the firmware's charging LED; Power OFF turns the device off. The LED itself was done in M3
 - ☐ IR TX decoded to the event log (ARCHITECTURE §6 puts it in M7; it was missing here)
 - ☐ USB FS device + CDC → xterm.js CLI (stretch: protobuf RPC)
 
