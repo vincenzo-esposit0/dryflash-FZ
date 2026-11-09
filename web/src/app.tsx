@@ -270,8 +270,16 @@ function DeviceView({
 }
 
 /** USB cable and charge, in effect at once and kept with the device; and what the charger does. */
-function BatteryControls({ battery, status, send }: { battery: BatterySettings; status: Status | null; send: Send }) {
-  const set = (b: Partial<BatterySettings>) => send({ type: "settings", battery: { ...battery, ...b } });
+function BatteryControls({ battery: stored, status, send }: { battery: BatterySettings; status: Status | null; send: Send }) {
+  // What the person just set, until the worker's device list catches up: a status update that
+  // re-renders in between would otherwise put the stored value back into the controls.
+  const [battery, setLocal] = useState(stored);
+  useEffect(() => setLocal(stored), [stored.usb, stored.percent]);
+  const set = (b: Partial<BatterySettings>) => {
+    const next = { ...battery, ...b };
+    setLocal(next);
+    send({ type: "settings", battery: next });
+  };
   const state = status?.off
     ? tr("poweredOff")
     : status?.charging
