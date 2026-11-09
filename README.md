@@ -52,7 +52,6 @@ npm run e2e                                    # the production build on the Wor
 
 Bring-up tool: `cargo run --release -p dryflash-core --example boot -- <firmware.dfu> --elf <firmware.elf>`
 prints the boot milestones and the bring-up digest. See [docs/BRINGUP_LOG.md](docs/BRINGUP_LOG.md).
-```
 
 ## Licence
 
