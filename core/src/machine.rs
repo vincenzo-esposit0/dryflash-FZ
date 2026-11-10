@@ -283,6 +283,7 @@ impl Machine {
     /// powers it up, as on the real charger.
     pub fn set_battery(&mut self, percent: u8, usb: bool) {
         self.bus.periphs.set_battery(percent, usb);
+        self.bus.periphs.set_usb_cable(usb);
         if self.off && !self.bus.periphs.power_cut() {
             self.power_on();
         } else if !self.off && self.bus.periphs.power_cut() {
@@ -374,6 +375,33 @@ impl Machine {
     /// Speaker and vibration motor changes since the last call, with their virtual times.
     pub fn take_senses(&mut self) -> Vec<crate::board::senses::SenseEvent> {
         self.bus.periphs.senses.take()
+    }
+
+    /// The page's terminal opens or closes the device's USB serial port (DTR on the computer side).
+    pub fn usb_serial_open(&mut self, open: bool) {
+        let ns = self.bus.periphs.now_ns(self.bus.now);
+        let p = &mut self.bus.periphs;
+        p.usb_host.port_open = open;
+        p.usb_host.kick(ns);
+        p.refresh_schedule();
+    }
+
+    /// Bytes typed into the page's terminal, for the device's USB serial port.
+    pub fn usb_serial_send(&mut self, data: &[u8]) {
+        let ns = self.bus.periphs.now_ns(self.bus.now);
+        let p = &mut self.bus.periphs;
+        p.usb_host.send(data, ns);
+        p.refresh_schedule();
+    }
+
+    /// What the device sent on its USB serial port since the last call.
+    pub fn take_usb_serial(&mut self) -> Vec<u8> {
+        self.bus.periphs.usb_host.take_rx()
+    }
+
+    /// Connection changes seen by the computer on the USB cable since the last call.
+    pub fn take_usb_events(&mut self) -> Vec<crate::board::usb_host::HostEvent> {
+        self.bus.periphs.usb_host.take_events()
     }
 
     /// IR transmissions finished since the last call.

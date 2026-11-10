@@ -7,7 +7,7 @@ import type { BatterySettings, BoardSettings, DeviceMeta } from "./devices";
 import type { IrSignal } from "./infrared";
 import type { SenseChange } from "./senses";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** Button indices understood by the core (core-wasm `set_button`). */
 export const BUTTONS = ["up", "down", "left", "right", "ok", "back"] as const;
@@ -24,6 +24,12 @@ export interface CardEntry {
   dir: boolean;
   size: number;
 }
+
+/** What the computer on the USB cable saw (core-wasm `take_usb_events`). */
+export type UsbEvent =
+  | { event: "configured"; product: string; serial: string }
+  | { event: "disconnected" }
+  | { event: "failed"; detail: string };
 
 export interface CrashRecord {
   atMs: number;
@@ -61,6 +67,10 @@ export type ToWorker =
   | { type: "eraseCard" }
   | { type: "flush" }
   | { type: "button"; button: ButtonName; down: boolean }
+  /** The page's terminal opens or closes the device's USB serial port (DTR). */
+  | { type: "serialOpen"; open: boolean }
+  /** Bytes typed into the terminal, for the device's USB serial port. */
+  | { type: "serialInput"; bytes: ArrayBuffer }
   | { type: "control"; action: "pause" | "resume" | "reset" }
   | { type: "turbo"; on: boolean }
   /** Changes to the active device; board and sleep settings apply at the next power cycle. */
@@ -131,6 +141,9 @@ export type FromWorker =
   /** IR transmissions finished since the last message. */
   | { type: "ir"; signals: IrSignal[] }
   | { type: "log"; bytes: ArrayBuffer }
+  /** What the device sent on its USB serial port. */
+  | { type: "serial"; bytes: ArrayBuffer }
+  | { type: "usb"; events: UsbEvent[] }
   | { type: "status"; status: Status }
   | {
       type: "stopped";

@@ -25,6 +25,15 @@ Flipper Zero is a trademark of its respective owner.
 
 - Unicorn Engine 2 (GPL-2.0) — reference CPU for differential testing only (ADR-0001).
 
+## Libraries (distributed with the site)
+
+- xterm.js (`@xterm/xterm` 6.0.0, `@xterm/addon-fit` 0.11.0), MIT licence — the CLI terminal.
+
+## Reference material for USB
+
+- libusb_stm32 (Apache-2.0), the USB stack inside the firmware (`lib/libusb_stm32`), read to model the USB peripheral as its
+  STM32WB55 driver uses it (ADR-0021). No code ported.
+
 ## Fonts (distributed with the site)
 
 - JetBrains Mono, Share Tech Mono, IBM Plex Sans (SIL Open Font License 1.1), through the `@fontsource` npm packages.

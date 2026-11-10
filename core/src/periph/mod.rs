@@ -26,6 +26,7 @@ pub mod svd;
 pub mod tim1;
 pub mod tim16;
 pub mod usart;
+pub mod usb;
 
 use crate::board::Battery;
 use crate::board::bq25896::{Bq25896, ChargeState};
@@ -93,6 +94,7 @@ enum Slot {
     Lptim(usize),
     Tim1,
     Tim16,
+    Usb,
     Generic(usize),
 }
 
@@ -121,6 +123,9 @@ pub struct Periphs {
     pub tim1: tim1::Tim1,
     /// The speaker's timer.
     pub tim16: tim16::Tim16,
+    /// USB full-speed device, with the computer at the other end of the cable.
+    pub usb: usb::Usb,
+    pub usb_host: crate::board::usb_host::UsbHost,
     /// Register-file-only peripherals.
     pub generic: Vec<RegFile>,
     /// (base, end, slot), sorted by base.
@@ -172,7 +177,9 @@ impl Periphs {
             // A block extends to the next block or its last register, within the 1 KiB stride.
             let last = d.regs.iter().map(|r| r.offset as u32 + 4).max().unwrap_or(4);
             let next = descs.get(i + 1).map(|n| n.base).unwrap_or(u32::MAX);
-            let end = (d.base + last.max(0x400)).min(next);
+            // The USB block is followed by its packet memory (RM0434 memory map: USB SRAM at 0x4000_6C00).
+            let span = if d.name == "USB" { 0x800 } else { 0x400 };
+            let end = (d.base + last.max(span)).min(next);
             let slot = match d.name {
                 "RCC" => Slot::Rcc,
                 "EXTI" => Slot::Exti,
@@ -219,6 +226,7 @@ impl Periphs {
                     tim16 = Some(tim16::Tim16::new(d));
                     Slot::Tim16
                 }
+                "USB" => Slot::Usb,
                 _ => {
                     generic.push(RegFile::new(d));
                     Slot::Generic(generic.len() - 1)
@@ -253,6 +261,8 @@ impl Periphs {
             lptim,
             tim1: tim1.expect("TIM1 in the SVD"),
             tim16: tim16.expect("TIM16 in the SVD"),
+            usb: usb::Usb::new(),
+            usb_host: Default::default(),
             generic,
             map,
             clocks,
@@ -507,6 +517,7 @@ impl Periphs {
         self.lptim.iter_mut().for_each(|l| l.reset());
         self.tim16.reset();
         self.tim1.reset();
+        self.usb.reset();
         self.infrared.clear();
         if kind == ResetKind::PowerOn {
             // The RTC is in the backup domain: only power-on (or BDRST) resets it.
@@ -525,8 +536,10 @@ impl Periphs {
         self.generic.iter_mut().for_each(|g| g.reset());
         self.clocks = self.rcc.clocks();
         self.tim1.clock_hz = self.apb2_timer_clock(rcc::APB2_TIM1);
+        self.usb.clocked = self.rcc.regs.get(rcc::APB1ENR1) & rcc::APB1_USB != 0;
         self.update_irqs();
         self.update_senses(ns);
+        self.schedule();
     }
 
     /// Runs peripheral events that are due and recomputes `next_event`.
@@ -535,7 +548,21 @@ impl Periphs {
         for l in &mut self.lptim {
             l.advance(ns);
         }
+        if self.usb_host.next_event_ns(&self.usb).is_some_and(|t| t <= ns) {
+            self.usb_host.step(&mut self.usb, ns);
+        }
         self.update_irqs();
+        self.schedule();
+    }
+
+    /// Recomputes the next peripheral event after a change from outside the bus.
+    pub fn refresh_schedule(&mut self) {
+        self.schedule();
+    }
+
+    /// The USB cable to the computer: in or out.
+    pub fn set_usb_cable(&mut self, plugged: bool) {
+        self.usb_host.cable = plugged;
         self.schedule();
     }
 
@@ -567,6 +594,7 @@ impl Periphs {
             .iter()
             .filter_map(|l| l.next_event_ns())
             .chain(self.tim1.next_event_ns())
+            .chain(self.usb_host.next_event_ns(&self.usb))
             .min();
         self.next_event = ns.map(|n| self.cycles_at(n));
     }
@@ -609,6 +637,9 @@ impl Periphs {
         if self.lptim[1].irq() {
             lines |= 1 << irq::LPTIM2;
         }
+        if self.usb.irq() {
+            lines |= 1 << irq::USB_LP;
+        }
         if lines != self.irq_lines {
             self.irq_lines = lines;
         }
@@ -640,6 +671,7 @@ impl Periphs {
             Slot::Lptim(i) => &self.lptim[i].regs,
             Slot::Tim1 => &self.tim1.regs,
             Slot::Tim16 => &self.tim16.regs,
+            Slot::Usb => unreachable!("USB registers are not a register file"),
             Slot::Generic(i) => &self.generic[i],
         }
     }
@@ -647,6 +679,9 @@ impl Periphs {
     /// Register-file content at `addr`, without side effects (for board models).
     pub fn peek(&self, addr: u32) -> Option<u32> {
         let (base, slot) = self.slot(addr)?;
+        if slot == Slot::Usb {
+            return Some(self.usb.read((addr - base) & !3, Size::Word));
+        }
         Some(self.regfile(slot).get((addr - base) & !3))
     }
 
@@ -660,6 +695,12 @@ impl Periphs {
         let (base, slot) = self.slot(addr)?;
         let off = addr - base;
         let word_off = off & !3;
+        if slot == Slot::Usb {
+            if !usb::Usb::known(off) {
+                ctx.digest.unimplemented(addr, false, None, ctx.pc);
+            }
+            return Some(self.usb.read(off, size));
+        }
         let word = match slot {
             Slot::Rcc => self.rcc.read(word_off, ctx, addr),
             Slot::Gpio(i) => self.gpio[i].read(word_off),
@@ -692,6 +733,7 @@ impl Periphs {
             }
             Slot::Tim1 => self.tim1.read(word_off),
             Slot::Tim16 => self.tim16.read(word_off),
+            Slot::Usb => unreachable!(),
             // SPI DR reads pop frames from the FIFO: the access size matters.
             Slot::Spi(i) => return Some(self.spi[i].read(off, size).unwrap_or(0)),
             Slot::Generic(i) => {
@@ -727,6 +769,17 @@ impl Periphs {
             }
             return true;
         }
+        if slot == Slot::Usb {
+            if !usb::Usb::known(off) {
+                ctx.digest.unimplemented(addr, true, Some(value), ctx.pc);
+            }
+            self.usb.write(off, value, size);
+            let ns = self.now_ns(ctx.now);
+            self.usb_host.kick(ns);
+            self.update_irqs();
+            self.schedule();
+            return true;
+        }
         // Sub-word writes update their byte lanes of the stored word.
         let value = match size {
             Size::Word => value,
@@ -755,6 +808,10 @@ impl Periphs {
                 if self.rcc.regs.get(rcc::APB2RSTR) & rcc::APB2_TIM1 != 0 {
                     self.tim1.reset();
                 }
+                if self.rcc.regs.get(rcc::APB1RSTR1) & rcc::APB1_USB != 0 {
+                    self.usb.reset();
+                }
+                self.usb.clocked = self.rcc.regs.get(rcc::APB1ENR1) & rcc::APB1_USB != 0;
                 self.tim1.clock_hz = self.apb2_timer_clock(rcc::APB2_TIM1);
                 self.lptim_clocks();
                 self.update_irqs();
@@ -830,7 +887,7 @@ impl Periphs {
                 h
             }
             Slot::Tim16 => self.tim16.write(word_off, value),
-            Slot::Spi(_) => unreachable!(),
+            Slot::Spi(_) | Slot::Usb => unreachable!(),
             Slot::Generic(i) => {
                 let ok = self.generic[i].write(word_off, value);
                 if ok {
@@ -992,6 +1049,16 @@ impl Periphs {
                 "IR transmitter (PB9, TIM1 channel 3N)",
                 Partial,
                 "carrier and mark/space timings of what the LED sends, shown as events; external module on PA7 not watched; IR receiver not emulated",
+            ),
+            (
+                "USB (full-speed device)",
+                Partial,
+                "endpoint registers, packet memory, control and bulk endpoints (double-buffered too), reset, frames, suspend and wakeup; no isochronous, LPM or charger detection",
+            ),
+            (
+                "Computer on the USB cable",
+                Simulated,
+                "a host that enumerates the device and opens its serial port (CDC ACM) for the page's terminal; transactions not bit-timed",
             ),
             (
                 "Battery (BQ27220, BQ25896)",

@@ -937,3 +937,41 @@ carrier periods until the next update (ADR-0020). That path now runs as on the d
 
 Demo: install a firmware package, open **Files** → `infrared`, upload a `.ir` file (or save one on the device). On the device, open
 Infrared → Saved Remotes → the file, press a button, and look at the Events panel under **Diagnostics**.
+
+### Checkpoint 4 — USB and the CLI
+
+In firmware 1.5.1 the CLI only runs on the USB serial port, and only after the computer raises DTR (`cli_vcp.c`). So the USB
+peripheral is now modelled, and a virtual computer sits at the other end of the page's USB cable (ADR-0021).
+
+- **USB device**: the endpoint registers with their mixed bit types, CNTR, ISTR, DADDR, BTABLE, the 1 KiB packet memory and
+  its buffer table, the clock and reset from RCC, the USB_LP interrupt. Control, bulk and interrupt endpoints, and the
+  double-buffered bulk endpoints the CDC data interface uses. **Partial**: no isochronous endpoints, no LPM, no charger
+  detection, no USB_HP line (the firmware treats both lines the same).
+- **Virtual host** (**Simulated**): with the cable in and the pull-up on, it resets the bus, sends frames, and enumerates. It reads
+  the descriptors and strings, sets the address and the configuration, and finds the CDC function. Opening the port sends the
+  line coding and DTR. Transactions are not bit-timed.
+- **Page**: a **CLI** tab with xterm.js. It shows the connection state, with the product and serial the firmware reports
+  (`flip_<name>`), and an Open/Close port button. Connections and disconnections go to the Events panel.
+- **Found on the way:** RM0434 does not say what a double-buffered endpoint's STAT bits read during a buffer conflict. The
+  firmware's driver only works if a double-buffered IN endpoint reads NAK with no buffer ready, and if a double-buffered OUT
+  endpoint keeps reading VALID. Modelled that way, and recorded in ADR-0021.
+- **Checked on the official firmware** in `core/tests/usb_cli_official.rs`. The firmware boots with the cable in and is
+  configured. Opening the port gives the greeting and the `>: ` prompt. `info device` returns the whole listing, many 64-byte
+  packets. Closing and reopening the port greets again. Unplugging gives a disconnect. In the browser by hand: the
+  same, with `info power` showing the virtual battery charging, at 1.00× speed.
+- **E2E**: 66 of 66 on Chromium and WebKit, including the new test. It plugs in USB, waits for "Connected", opens the
+  port, reads the greeting, types `info power` and reads the answer. The tab-order test now expects CLI after Device.
+  Firefox runs in CI.
+- **CSP:** xterm.js needs inline styles, which `style-src 'self'` blocked. Without them the terminal had no colours. The
+  maintainer chose `style-src 'self' 'unsafe-inline'` for the main page only. Scripts stay `'self'`, and `/embed` is unchanged
+  (ADR-0021).
+- **Not tested:** other firmwares; other USB modes (HID, U2F, dual CDC); protobuf RPC (stretch).
+
+Demo: install a firmware package, tick **USB** in the toolbar, open the **CLI** tab, wait for "Connected", press **Open the
+port**, and type `help`.
+
+### M7 definition of done
+
+"CLI usable in the browser; audio/vibro/LED visible and controllable": met. The CLI is checkpoint 4. Speaker and vibration are
+checkpoint 1. Battery, USB charging and the charging LED are checkpoint 2. IR transmit is checkpoint 3. The protobuf RPC
+stretch goal is not done.

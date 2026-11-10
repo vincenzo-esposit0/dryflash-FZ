@@ -10,6 +10,7 @@ pub const EXTI2: u32 = 8;
 pub const EXTI3: u32 = 9;
 pub const EXTI4: u32 = 10;
 pub const DMA1_CH1: u32 = 11;
+pub const USB_LP: u32 = 20;
 pub const EXTI9_5: u32 = 23;
 pub const I2C1_EV: u32 = 30;
 pub const I2C3_EV: u32 = 32;

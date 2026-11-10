@@ -63,6 +63,8 @@ pub struct Emulator {
     uid64: u64,
     /// The page's battery: charge in percent, USB plugged in.
     battery: (u8, bool),
+    /// The page's terminal has the device's USB serial port open.
+    serial_open: bool,
     /// USART1 bytes already handed to the host.
     log_read: usize,
     /// Description of the last non-budget exit.
@@ -81,6 +83,8 @@ impl Emulator {
         m.bus.provision_otp(&self.board);
         m.bus.set_uid64(self.uid64);
         m.bus.periphs.set_battery(self.battery.0, self.battery.1);
+        m.bus.periphs.set_usb_cable(self.battery.1);
+        m.bus.periphs.usb_host.port_open = self.serial_open;
         m.set_crash_entries(&crash_entries(self.symbols.as_ref()));
         if let Some(old) = self.m.bus.periphs.remove_sd() {
             let mut card = SdCard::new(old.capacity_blocks(), BlockStore::default());
@@ -121,6 +125,7 @@ impl Emulator {
             board: BoardInfo::default(),
             uid64: 0,
             battery: (80, false),
+            serial_open: false,
             log_read: 0,
             last_stop: String::new(),
         }
@@ -515,6 +520,44 @@ impl Emulator {
     /// IR transmissions finished since the last call: per transmission, virtual ms of the first
     /// mark, carrier Hz (0 for a constant level), duty cycle, the number of timings, then the
     /// timings in µs (mark, space, …, mark).
+    /// Opens or closes the device's USB serial port from the computer's side (DTR).
+    pub fn usb_serial_open(&mut self, open: bool) {
+        self.serial_open = open;
+        self.m.usb_serial_open(open);
+    }
+
+    /// Bytes for the device's USB serial port.
+    pub fn usb_serial_send(&mut self, bytes: &[u8]) {
+        self.m.usb_serial_send(bytes);
+    }
+
+    /// What the device sent on its USB serial port since the last call.
+    pub fn take_usb_serial(&mut self) -> Vec<u8> {
+        self.m.take_usb_serial()
+    }
+
+    /// What the computer saw on the USB cable since the last call, as a JSON array of
+    /// `{"event":"configured","product":…,"serial":…}`, `{"event":"disconnected"}` and
+    /// `{"event":"failed","detail":…}`.
+    pub fn take_usb_events(&mut self) -> String {
+        use dryflash_core::board::usb_host::HostEvent;
+        let items: Vec<String> = self
+            .m
+            .take_usb_events()
+            .into_iter()
+            .map(|e| match e {
+                HostEvent::Configured { product, serial } => format!(
+                    r#"{{"event":"configured","product":{},"serial":{}}}"#,
+                    json_str(&product),
+                    json_str(&serial)
+                ),
+                HostEvent::Disconnected => r#"{"event":"disconnected"}"#.to_string(),
+                HostEvent::Failed(d) => format!(r#"{{"event":"failed","detail":{}}}"#, json_str(&d)),
+            })
+            .collect();
+        format!("[{}]", items.join(","))
+    }
+
     pub fn take_ir(&mut self) -> Vec<f64> {
         let mut out = Vec::new();
         for s in self.m.take_ir() {
