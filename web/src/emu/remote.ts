@@ -63,15 +63,30 @@ export async function fetchFirmware(
   try {
     direct = await doFetch(u.href);
   } catch {
-    // A browser reports a missing CORS header as a network error: try the proxy.
-    const proxied = await doFetch(`/proxy/fetch?url=${encodeURIComponent(u.href)}`);
-    if (!proxied.ok) {
-      throw new Error(`cannot download ${u.href}: the host allows no direct download, and the proxy said ${proxied.status}: ${await proxied.text()}`);
+    try {
+      // A host that echoes the Origin in Access-Control-Allow-Origin without `Vary: Origin`
+      // (update.flipperzero.one) lets the browser's cache hand back a copy made for another
+      // origin, which then fails CORS. Asking past the cache settles it.
+      direct = await doFetch(u.href, { cache: "reload" });
+    } catch {
+      // A browser reports a missing CORS header as a network error: try the proxy.
+      return { bytes: await read(await viaProxy(u, doFetch), onProgress), name, viaProxy: true };
     }
-    return { bytes: await read(proxied, onProgress), name, viaProxy: true };
   }
   if (!direct.ok) throw new Error(`cannot download ${u.href}: ${direct.status}`);
   return { bytes: await read(direct, onProgress), name, viaProxy: false };
+}
+
+async function viaProxy(u: URL, doFetch: typeof fetch): Promise<Response> {
+  const proxied = await doFetch(`/proxy/fetch?url=${encodeURIComponent(u.href)}`);
+  if (!proxied.ok) {
+    throw new Error(`cannot download ${u.href}: the host allows no direct download, and the proxy said ${proxied.status}: ${await proxied.text()}`);
+  }
+  // A static host without the Worker answers any path with the app's page.
+  if ((proxied.headers.get("Content-Type") ?? "").startsWith("text/html")) {
+    throw new Error(`cannot download ${u.href}: the host allows no direct download, and this site has no download proxy. Download the file and drop it on the page.`);
+  }
+  return proxied;
 }
 
 /** The parameters of a link (docs/EMBED.md). */

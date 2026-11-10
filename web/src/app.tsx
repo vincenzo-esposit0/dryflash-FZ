@@ -1457,6 +1457,8 @@ export function App({ embed = false }: { embed?: boolean }) {
                   open={serialOpen}
                   setOpen={(open) => {
                     setSerialOpen(open);
+                    // Opening the port with the cable out plugs it in: that is what the person is after.
+                    if (open && active && !active.battery.usb) send({ type: "settings", battery: { ...active.battery, usb: true } });
                     send({ type: "serialOpen", open });
                     noteSerial(tr(open ? "cliPortOpened" : "cliPortClosed"));
                   }}

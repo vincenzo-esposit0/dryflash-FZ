@@ -6,11 +6,12 @@ Try any Flipper Zero firmware before flashing it to your real device: dryflash e
 real, unmodified release binaries (`.dfu` / update `.tgz`) on an instruction-level model of the
 STM32WB55, with no backend and no hardware.
 
-> **Status: pre-alpha (milestone M6).** Try it at **https://app.dryflash.workers.dev**: drop a
-> firmware `.tgz` or `.dfu` on the page, or open a link with `?fw=<url>`. Firmwares boot to the Desktop on
-> virtual devices saved in your browser, apps run from the card, and a package can be installed by the
-> firmware's own updater. It can be embedded in other pages ([docs/EMBED.md](docs/EMBED.md)).
-> No Bluetooth and no radio stack. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Version 1.0.** Try it at **https://app.dryflash.workers.dev**: pick a firmware (Official, Momentum,
+> Unleashed, RogueMaster) or drop a `.tgz` or `.dfu` on the page, or open a link with `?fw=<url>`. Firmwares boot
+> to the Desktop on virtual devices saved in your browser; apps run from the card; the firmware's own updater can
+> install a package; the CLI answers over a virtual USB cable; sound, vibration, battery and IR transmit are there.
+> It can be embedded in other pages ([docs/EMBED.md](docs/EMBED.md)). No Bluetooth and no radio stack; Sub-GHz,
+> NFC and RFID receive no signals. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it is — and what it is not
 
@@ -28,7 +29,7 @@ on hardware.
 | `runner/` | Headless Node CLI (`dryflash run …`) |
 | `web/` | Static web app (Vite + Preact) |
 | `proxy/` | Allowlisted CORS proxy (Cloudflare Worker) |
-| `action/` | GitHub Action — M6 |
+| `action/` | GitHub Action (smoke test of a firmware build) |
 | `firmware/compat.json` | Pinned firmware packages (URLs + hashes; binaries are never committed) |
 | `tests/` | Integration tests and the CPU benchmark |
 | `docs/` | Brief, architecture, roadmap, bring-up log, ADRs |
@@ -45,6 +46,7 @@ cargo install --locked wasm-bindgen-cli --version 0.2.130
 scripts/build-wasm.sh                          # wasm core + JS bindings for web/ and runner/
 npm install && npm test                        # web tests
 npm run dev -w web                             # emulator at http://localhost:5173 (drop a .dfu on the page)
+npx wrangler dev --config proxy/wrangler.jsonc # optional, beside it: the download proxy for GitHub-hosted firmwares
 npm run build                                  # static web build in web/dist
 npx playwright install --with-deps             # once, from tests/e2e
 npm run e2e                                    # the production build on the Worker, in three browser engines
