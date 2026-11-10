@@ -21,6 +21,8 @@ pub const DISPLAY_RST: (usize, u8) = (PORT_B, 0);
 /// Speaker and vibration motor (furi_hal_resources.h: SPEAKER PB8, VIBRO PA8).
 pub const SPEAKER: (usize, u8) = (PORT_B, 8);
 pub const VIBRO: (usize, u8) = (PORT_A, 8);
+/// IR LED (furi_hal_resources.h: IR_TX_GPIO_Port GPIOB, IR_TX_Pin 9).
+pub const IR_TX: (usize, u8) = (PORT_B, 9);
 
 /// The six buttons (furi_hal_resources.c `input_pins`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -61,6 +63,7 @@ pub mod bq25896;
 pub mod bq27220;
 pub mod cc1101;
 pub mod fat32;
+pub mod infrared;
 pub mod lp5562;
 pub mod otp;
 pub mod sdcard;

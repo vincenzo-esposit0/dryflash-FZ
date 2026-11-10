@@ -285,6 +285,50 @@ test.describe("with a firmware", () => {
     await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
   });
 
+  test("a saved remote's button shows what the IR LED sent, ready to save as .ir", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    await page.getByRole("tab", { name: "Files" }).click();
+    await page.locator(".files li", { hasText: "infrared" }).getByRole("button", { name: "infrared" }).click();
+    await expect(page.locator(".files")).toContainText("assets");
+    await page.locator('.file-button:has-text("Upload") input').setInputFiles({
+      name: "Test.ir",
+      mimeType: "text/plain",
+      buffer: Buffer.from(
+        "Filetype: IR signals file\nVersion: 1\n#\nname: Power\ntype: parsed\nprotocol: NEC\naddress: 04 00 00 00\ncommand: 08 00 00 00\n",
+      ),
+    });
+    await expect(page.locator(".files li", { hasText: "Test.ir" })).toBeVisible();
+    // Changing the card restarts the device: wait for its second boot.
+    await page.getByRole("tab", { name: "Diagnostics" }).click();
+    await expect
+      .poll(async () => ((await page.locator(".log").textContent()) ?? "").split("Secure Enclave verification failed").length - 1, {
+        timeout: 30_000,
+      })
+      .toBe(2);
+
+    await page.locator("footer p").first().click(); // keys to the device
+    const step = async (key: string, ms = 700) => {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(ms);
+    };
+    // Popup, menu, Infrared (fourth), Saved Remotes (third), past `assets` to Test.ir, Power.
+    for (const key of ["Escape", "Enter"]) await step(key);
+    for (let i = 0; i < 3; i++) await step("ArrowDown", 400);
+    await step("Enter", 2500);
+    for (let i = 0; i < 2; i++) await step("ArrowDown", 400);
+    await step("Enter", 2000);
+    await step("ArrowDown", 400);
+    await step("Enter", 2000);
+    await step("Enter", 1500);
+    const sent = page.locator(".events li", { hasText: "IR sent" }).first();
+    await expect(sent).toContainText(/IR sent: 38\.0 kHz carrier, duty 33 %, 67 timings, \d+\.\d ms/, { timeout: 15_000 });
+    const [file] = await Promise.all([page.waitForEvent("download"), sent.getByRole("button", { name: "Save as .ir" }).click()]);
+    expect(file.suggestedFilename()).toMatch(/^ir-\d+ms\.ir$/);
+    const text = (await (await import("node:fs/promises")).readFile(await file.path())).toString();
+    expect(text).toMatch(/^Filetype: IR signals file\nVersion: 1\n#\nname: Sent\ntype: raw\nfrequency: 3800\d\nduty_cycle: 0\.33\d+\ndata: (\d+ ){66}\d+\n$/);
+  });
+
   test("a device exports and imports as a new one with its firmware", async ({ page }) => {
     await install(page);
     await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);

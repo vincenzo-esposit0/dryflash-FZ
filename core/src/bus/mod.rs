@@ -385,6 +385,11 @@ impl Bus for SystemBus {
             pc: self.access_pc,
         };
         self.periphs.advance(&mut ctx);
+        // TIM1 update events one by one: each one's DMA sets the time of the next (the IR driver).
+        while let Some(ns) = self.periphs.tim1_step(now) {
+            self.tim1_dma(ns);
+            self.periphs.tim1_updated(ns);
+        }
     }
 }
 

@@ -211,7 +211,7 @@ Initial fidelity targets:
 | CC1101 | Stubbed (register file + strobes, no RX signal) → Partial in M8 | M2 init |
 | ST25R3916 | Stubbed (init + "no tag") → Partial in M8 | M2 init |
 | RFID 125 kHz, iButton | Stubbed ("no tag", "no key") | M2 init |
-| IR RX/TX | Partial (TX decoded to event log) | M7 |
+| IR RX/TX | Partial: TX through TIM1 + DMA2 turned back into carrier and timings, shown as events (ADR-0020, M7 checkpoint 3); RX not emulated → M8 | M7 |
 | Speaker (TIM16 PWM) | Partial (frequency/duty → WebAudio; done in M7 checkpoint 1) | M7 |
 | Vibro, GPIO header | Emulated (pin state; vibro done in M7 checkpoint 1) | M7 |
 | USB FS device (CDC) | Partial (enough for CLI) | M7 |

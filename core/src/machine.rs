@@ -296,6 +296,7 @@ impl Machine {
         self.power_changes += 1;
         let ns = self.bus.periphs.now_ns(self.cpu.cycles);
         self.bus.periphs.senses.update(ns, None, false);
+        self.bus.periphs.infrared.clear();
         self.bus.digest.event(
             self.cpu.cycles,
             "power off: charger BATFET off (ship mode), no USB".to_string(),
@@ -373,6 +374,11 @@ impl Machine {
     /// Speaker and vibration motor changes since the last call, with their virtual times.
     pub fn take_senses(&mut self) -> Vec<crate::board::senses::SenseEvent> {
         self.bus.periphs.senses.take()
+    }
+
+    /// IR transmissions finished since the last call.
+    pub fn take_ir(&mut self) -> Vec<crate::board::infrared::IrSignal> {
+        self.bus.periphs.infrared.take()
     }
 
     pub fn digest(&self) -> &Digest {

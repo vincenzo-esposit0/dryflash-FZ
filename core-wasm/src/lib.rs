@@ -512,6 +512,23 @@ impl Emulator {
         out
     }
 
+    /// IR transmissions finished since the last call: per transmission, virtual ms of the first
+    /// mark, carrier Hz (0 for a constant level), duty cycle, the number of timings, then the
+    /// timings in µs (mark, space, …, mark).
+    pub fn take_ir(&mut self) -> Vec<f64> {
+        let mut out = Vec::new();
+        for s in self.m.take_ir() {
+            out.extend([
+                s.at_ns as f64 / 1e6,
+                s.hz as f64,
+                s.duty as f64,
+                s.timings_us.len() as f64,
+            ]);
+            out.extend(s.timings_us.iter().map(|&t| t as f64));
+        }
+        out
+    }
+
     pub fn cycles(&self) -> f64 {
         self.m.cpu.cycles as f64
     }

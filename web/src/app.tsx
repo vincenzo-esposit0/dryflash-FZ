@@ -14,6 +14,7 @@ import type {
 } from "./emu/protocol";
 import { tr, type Key } from "./i18n";
 import { LINK_DEVICE, fetchFirmware, linkMustAsk, parseLink, type LinkParams } from "./emu/remote";
+import { durationMs, irFile, type IrSignal } from "./emu/infrared";
 import { stripAnsi } from "./ui/ansi";
 import { download, formatSize, joinPath, parentPath } from "./ui/download";
 import { encodeGif, type GifFrame } from "./ui/gif";
@@ -270,6 +271,23 @@ function DeviceView({
 }
 
 /** USB cable and charge, in effect at once and kept with the device; and what the charger does. */
+/** An entry of the Events panel; an IR transmission carries itself as an `.ir` file to save. */
+type EventItem = { text: string; ir?: { name: string; text: string } };
+
+function irEvent(s: IrSignal): EventItem {
+  const text = tr("irEvent")
+    .replace("{khz}", (s.hz / 1000).toFixed(1))
+    .replace("{duty}", (s.duty * 100).toFixed(0))
+    .replace("{n}", String(s.timingsUs.length))
+    .replace("{ms}", durationMs(s).toFixed(1));
+  const file = irFile(s, "Sent");
+  const name = `ir-${s.atMs.toFixed(0)}ms.ir`; // virtual time: unique within a run
+  return {
+    text: s.hz > 0 ? text : tr("irEventConstant").replace("{n}", String(s.timingsUs.length)),
+    ir: file ? { name, text: file } : undefined,
+  };
+}
+
 function BatteryControls({ battery: stored, status, send }: { battery: BatterySettings; status: Status | null; send: Send }) {
   // What the person just set, until the worker's device list catches up: a status update that
   // re-renders in between would otherwise put the stored value back into the controls.
@@ -665,7 +683,13 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [leds, setLeds] = useState<[number, number, number, number]>([0, 0, 0, 0]);
   const [log, setLog] = useState("");
-  const [events, setEvents] = useState<string[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  /** Events in the order they happened; the list shows the newest first. */
+  const addEvents = (...items: (string | EventItem)[]) => {
+    const time = new Date().toLocaleTimeString();
+    const stamped = items.map((e) => (typeof e === "string" ? { text: `${time} ${e}` } : { ...e, text: `${time} ${e.text}` }));
+    setEvents((list) => [...stamped.reverse(), ...list].slice(0, EVENT_LIMIT));
+  };
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const [stop, setStop] = useState<Stop | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -854,15 +878,12 @@ export function App({ embed = false }: { embed?: boolean }) {
         case "lights":
           backlight.current = m.rgbw[3];
           setLeds(m.rgbw);
-          setEvents((list) =>
-            [
-              `${new Date().toLocaleTimeString()} ${tr("ledEvent")
-                .replace("{r}", String(m.rgbw[0]))
-                .replace("{g}", String(m.rgbw[1]))
-                .replace("{b}", String(m.rgbw[2]))
-                .replace("{w}", String(m.rgbw[3]))}`,
-              ...list,
-            ].slice(0, EVENT_LIMIT),
+          addEvents(
+            tr("ledEvent")
+              .replace("{r}", String(m.rgbw[0]))
+              .replace("{g}", String(m.rgbw[1]))
+              .replace("{b}", String(m.rgbw[2]))
+              .replace("{w}", String(m.rgbw[3])),
           );
           redraw();
           break;
@@ -871,21 +892,18 @@ export function App({ embed = false }: { embed?: boolean }) {
           for (const c of m.changes) {
             if ("vibro" in c) buzz(c.vibro);
           }
-          setEvents((list) =>
-            [
-              ...m.changes.map(
-                (c) =>
-                  `${new Date().toLocaleTimeString()} ${
-                    "vibro" in c
-                      ? tr(c.vibro ? "vibroOn" : "vibroOff")
-                      : c.tone
-                        ? tr("toneEvent").replace("{hz}", c.tone.hz.toFixed(0))
-                        : tr("toneOff")
-                  }`,
-              ).reverse(),
-              ...list,
-            ].slice(0, EVENT_LIMIT),
+          addEvents(
+            ...m.changes.map((c) =>
+              "vibro" in c
+                ? tr(c.vibro ? "vibroOn" : "vibroOff")
+                : c.tone
+                  ? tr("toneEvent").replace("{hz}", c.tone.hz.toFixed(0))
+                  : tr("toneOff"),
+            ),
           );
+          break;
+        case "ir":
+          addEvents(...m.signals.map(irEvent));
           break;
         case "log": {
           const text = stripAnsi(decoder.decode(new Uint8Array(m.bytes), { stream: true }));
@@ -896,7 +914,7 @@ export function App({ embed = false }: { embed?: boolean }) {
           if (m.status.off !== wasOff.current) {
             const off = m.status.off;
             wasOff.current = off;
-            setEvents((list) => [`${new Date().toLocaleTimeString()} ${tr(off ? "powerOffEvent" : "powerOnEvent")}`, ...list].slice(0, EVENT_LIMIT));
+            addEvents(tr(off ? "powerOffEvent" : "powerOnEvent"));
           }
           setStatus(m.status);
           audible.current = m.status.running && !m.status.turbo;
@@ -1523,7 +1541,17 @@ export function App({ embed = false }: { embed?: boolean }) {
                     ) : (
                       <ul class="events scroll" tabIndex={0}>
                         {events.map((e) => (
-                          <li>{e}</li>
+                          <li>
+                            {e.text}
+                            {e.ir && (
+                              <>
+                                {" "}
+                                <button type="button" class="link" title={tr("saveIrNote")} onClick={() => download(e.ir!.name, e.ir!.text, "text/plain")}>
+                                  {tr("saveIr")}
+                                </button>
+                              </>
+                            )}
+                          </li>
                         ))}
                       </ul>
                     )}

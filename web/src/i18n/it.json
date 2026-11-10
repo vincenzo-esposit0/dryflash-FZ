@@ -103,7 +103,7 @@
   "eventsPanel": "Eventi",
   "noEvents": "Ancora nessun evento.",
   "ledEvent": "LED R{r} G{g} B{b}, retroilluminazione {w}",
-  "moreEventsLater": "Per ora LED, altoparlante e vibrazione; IR e GPIO arriveranno con quelle periferiche.",
+  "moreEventsLater": "Per ora LED, altoparlante, vibrazione e IR inviato; il GPIO arriverà con quella periferica.",
   "recording": "Registrazione in corso…",
   "gifLimit": "La GIF si ferma da sola dopo 30 secondi.",
   "noRecorder": "Questo browser non può registrare video.",
@@ -196,5 +196,9 @@
   "powerOn": "Accendi",
   "powerOnNote": "Un reset all'accensione, come quando si riaccende il dispositivo.",
   "powerOffEvent": "Spento (il caricatore ha staccato la batteria)",
-  "powerOnEvent": "Acceso"
+  "powerOnEvent": "Acceso",
+  "irEvent": "IR inviato: portante {khz} kHz, duty {duty} %, {n} durate, {ms} ms",
+  "irEventConstant": "IR inviato senza portante: {n} durate",
+  "saveIr": "Salva come .ir",
+  "saveIrNote": "Salva il segnale come voce raw di un file .ir Flipper, così come l'ha inviato il LED IR"
 }
