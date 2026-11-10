@@ -55,10 +55,19 @@ a:hover { color: var(--ink); }
 .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 4px 12px; border: 1px solid var(--line); color: var(--dim); font-size: 0.875rem; text-decoration: none; white-space: nowrap; }
 .chip:hover { border-color: rgb(0 255 102 / 0.4); color: var(--neon); }
 .chip[aria-current="page"] { border-color: var(--neon); background: rgb(0 255 102 / 0.1); color: var(--neon); box-shadow: 0 0 0 1px rgb(0 255 102 / 0.35), 0 0 18px -4px rgb(0 255 102 / 0.45); }
-.stage-chip { margin-left: auto; padding: 2px 8px; border: 1px solid rgb(255 102 0 / 0.6); color: var(--flipper); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.stage-chip { margin-left: auto; padding: 2px 8px; border: 1px solid rgb(255 102 0 / 0.6); color: var(--flipper); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; white-space: nowrap; }
 button.lang { gap: 4px; font-weight: 400; color: var(--dim); }
 button.lang .on { color: var(--neon); font-weight: 600; }
 button.lang:hover:not(:disabled) .on { color: var(--void); }
+/* Phones: the header scrolls away with the page, and the links fit on one line that scrolls sideways,
+   so the device is not under a quarter of the screen of chrome. */
+@media (max-width: 719px) {
+  html { scroll-padding-top: 8px; }
+  .site-header { position: static; }
+  .bar { gap: 8px; }
+  .nav { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .nav .chip { min-height: 36px; padding: 4px 10px; }
+}
 .prompt { margin: 0 0 12px; color: var(--dim); font-size: 0.875rem; overflow-wrap: anywhere; }
 .cursor { display: inline-block; width: 0.55em; height: 1em; margin-left: 4px; vertical-align: text-bottom; background: var(--neon); animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
@@ -230,6 +239,9 @@ th { color: var(--dim); font-size: 0.75rem; font-weight: 400; letter-spacing: 0.
 @media (min-width: 640px) { .page h2 { font-size: 2.25rem; } }
 .page h3 { margin: 24px 0 8px; font: 400 1.25rem var(--display); }
 .page p { max-width: 70ch; font: 1.125rem/1.625 var(--sans); }
+.page ol.steps { max-width: 70ch; padding-left: 1.5em; font: 1.125rem/1.625 var(--sans); }
+.page ol.steps li { margin: 4px 0; }
+.page ol.steps li::marker { color: var(--neon); font-family: var(--mono); }
 .page p.prompt { font: 0.875rem/1.5 var(--mono); max-width: none; }
 .page p.hint { font: 0.875rem/1.5 var(--sans); }
 

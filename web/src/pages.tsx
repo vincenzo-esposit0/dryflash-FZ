@@ -140,6 +140,12 @@ export function AboutPage() {
       <main class="page" id="main">
       <Prompt command="cat ABOUT.md" />
       <h2>{tr("aboutTitle")}</h2>
+      <h3>{tr("aboutStart")}</h3>
+      <ol class="steps">
+        {(["aboutStart1", "aboutStart2", "aboutStart3", "aboutStart4", "aboutStart5"] as const).map((k) => (
+          <li>{tr(k)}</li>
+        ))}
+      </ol>
       <h3>{tr("aboutHow")}</h3>
       <p>{tr("aboutHowText")}</p>
       <h3>{tr("aboutLimits")}</h3>

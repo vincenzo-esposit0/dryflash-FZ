@@ -43,8 +43,27 @@ describe("fetchFirmware", () => {
     const progress: number[] = [];
     const r = await fetchFirmware(GH, BASE, (d) => progress.push(d), f);
     expect(r.viaProxy).toBe(true);
-    expect(seen[1]).toBe(`/proxy/fetch?url=${encodeURIComponent(GH)}`);
+    expect(seen).toEqual([GH, GH, `/proxy/fetch?url=${encodeURIComponent(GH)}`]);
     expect(progress.at(-1)).toBe(2);
+  });
+
+  it("asks past the browser's cache before the proxy", async () => {
+    // A cached copy made for another origin fails CORS; a fresh request does not.
+    const f = (async (_u: string, init?: RequestInit) => {
+      if (init?.cache !== "reload") throw new TypeError("Failed to fetch");
+      return new Response(new Uint8Array(3));
+    }) as unknown as typeof fetch;
+    const r = await fetchFirmware(GH, BASE, undefined, f);
+    expect(r).toMatchObject({ viaProxy: false });
+    expect(r.bytes.byteLength).toBe(3);
+  });
+
+  it("says so when the site has no proxy", async () => {
+    const f = (async (u: string) => {
+      if (!u.startsWith("/proxy/")) throw new TypeError("Failed to fetch");
+      return new Response("<!doctype html>", { headers: { "Content-Type": "text/html" } });
+    }) as unknown as typeof fetch;
+    await expect(fetchFirmware(GH, BASE, undefined, f)).rejects.toThrow(/no download proxy/);
   });
 
   it("reports what the proxy refuses", async () => {

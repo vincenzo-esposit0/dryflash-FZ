@@ -10,4 +10,7 @@ export default defineConfig({
   build: { assetsInlineLimit: 0 },
   // The emulator worker is an ES module (top-level await for the wasm init).
   worker: { format: "es" },
+  // Downloads from hosts without CORS go through the Worker (ADR-0002): run it with
+  // `npx wrangler dev --config proxy/wrangler.jsonc` to use them from the dev server.
+  server: { proxy: { "/proxy": "http://localhost:8787" } },
 });

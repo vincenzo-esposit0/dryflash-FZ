@@ -1,6 +1,6 @@
 # dryflash — Roadmap
 
-Status: **approved 2026-10-31**; M0–M7 done; next M8 (stretch). Milestones follow BRIEF §12. Each milestone ends with: passing tests,
+Status: **approved 2026-10-31**; M0–M7 done; version 1.0 prepared for public use on 2026-11-10; M8 (stretch) is on hold. Milestones follow BRIEF §12. Each milestone ends with: passing tests,
 updated `docs/BRINGUP_LOG.md`, a short demo instruction, a commit, and a stop-and-report.
 
 Legend: ☐ todo · ◐ in progress · ☑ done

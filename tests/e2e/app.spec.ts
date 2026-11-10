@@ -310,6 +310,15 @@ test.describe("with a firmware", () => {
     await expect(page.locator(".events")).toContainText("USB: connected to the computer as");
   });
 
+  test("opening the CLI's port with the cable out plugs it in", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    await page.getByRole("tab", { name: "CLI" }).click();
+    await page.getByRole("button", { name: "Open the port" }).click();
+    await expect(page.getByRole("group", { name: "Battery" }).getByRole("checkbox", { name: "USB" })).toBeChecked();
+    await expect(page.locator(".terminal-box")).toContainText("Welcome to Flipper Zero Command Line Interface!", { timeout: 20_000 });
+  });
+
   test("a saved remote's button shows what the IR LED sent, ready to save as .ir", async ({ page }) => {
     await install(page);
     await bootToPopup(page);

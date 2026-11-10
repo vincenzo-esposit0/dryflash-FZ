@@ -975,3 +975,24 @@ port**, and type `help`.
 "CLI usable in the browser; audio/vibro/LED visible and controllable": met. The CLI is checkpoint 4. Speaker and vibration are
 checkpoint 1. Battery, USB charging and the charging LED are checkpoint 2. IR transmit is checkpoint 3. The protobuf RPC
 stretch goal is not done.
+
+## Version 1.0 — ready for everyone (2026-11-10)
+
+Development pauses after M7: the maintainer asked for a working, final app for enthusiasts. A walk through the public
+site turned up:
+
+- **The Official button failed on the public site.** `update.flipperzero.one` echoes the request's Origin in
+  `Access-Control-Allow-Origin` but sends no `Vary: Origin`. A browser that had fetched the file from another origin
+  (the dev server, a preview URL) kept that copy and served it again, and CORS refused it. The proxy then refused the
+  host, which is not on its allowlist and does not need to be. Fixed in `web/src/emu/remote.ts`: one more direct request
+  with `cache: "reload"` before the proxy. Reproduced in the browser, fixed, and covered by a unit test.
+- **A site without the Worker** answers `/proxy/fetch` with the app's page. That now says "this site has no download
+  proxy" in place of "invalid DFU suffix". The dev server forwards `/proxy` to `wrangler dev` on port 8787.
+- **Status**: the header showed "Pre-alpha · M6". It now shows the version from `web/package.json`, 1.0.0, and the footer
+  no longer names a milestone. The Cargo workspace is 1.0.0 too; the runner keeps its own release number (docs/RELEASE.md).
+- **Phones**: the sticky header took 190 of 812 pixels. Below 720 px it now scrolls away with the page, and the links
+  sit on one line that scrolls sideways: 101 pixels.
+- **CLI**: opening the port with the cable out plugs it in, so the CLI is one click away. New E2E test.
+- **About** has a getting-started list: picking or dropping a firmware, the keys, the tabs, links with `?fw=`.
+
+Demo: open https://app.dryflash.workers.dev, press **Official**, open the **CLI** tab, press **Open the port**.

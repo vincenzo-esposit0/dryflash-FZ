@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { version } from "../../package.json";
 import { getLocale, setLocale, tr, type Key } from "../i18n";
 
 const HUB = "https://vincenzo-esposit0.github.io/flipper-zero-firmware-hub/";
@@ -34,7 +35,7 @@ export function SiteHeader() {
             {tr("navHub")} <span aria-hidden="true">↗</span>
           </a>
         </nav>
-        <span class="stage-chip">{tr("statusChip")}</span>
+        <span class="stage-chip" title={tr("versionTitle")}>v{version}</span>
         <button type="button" class="lang" aria-label={tr("switchLanguage")} onClick={() => setLocale(getLocale() === "it" ? "en" : "it")}>
           <span class={getLocale() === "it" ? "on" : ""}>IT</span>
           <span>/</span>
