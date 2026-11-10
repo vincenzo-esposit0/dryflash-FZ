@@ -103,7 +103,7 @@
   "eventsPanel": "Events",
   "noEvents": "No events yet.",
   "ledEvent": "LED R{r} G{g} B{b}, backlight {w}",
-  "moreEventsLater": "LEDs, speaker and vibration for now; IR and GPIO arrive with those peripherals.",
+  "moreEventsLater": "LEDs, speaker, vibration and IR sent for now; GPIO arrives with that peripheral.",
   "recording": "Recording…",
   "gifLimit": "GIF stops by itself after 30 seconds.",
   "noRecorder": "This browser cannot record video.",
@@ -196,5 +196,9 @@
   "powerOn": "Power on",
   "powerOnNote": "A power-on reset, as when the device is switched on again.",
   "powerOffEvent": "Power off (the charger cut the battery off)",
-  "powerOnEvent": "Power on"
+  "powerOnEvent": "Power on",
+  "irEvent": "IR sent: {khz} kHz carrier, duty {duty} %, {n} timings, {ms} ms",
+  "irEventConstant": "IR sent without a carrier: {n} timings",
+  "saveIr": "Save as .ir",
+  "saveIrNote": "Saves the signal as a raw entry of a Flipper .ir file, as the IR LED sent it"
 }

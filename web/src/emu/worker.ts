@@ -16,6 +16,7 @@ import {
 import { BUTTONS, PROTOCOL_VERSION, type FromWorker, type ToWorker } from "./protocol";
 import { Pacer, PressTimer, SLICE_BUDGET_MS, STEP_MS } from "./scheduler";
 import { decodeSenses } from "./senses";
+import { decodeIr } from "./infrared";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 const post = (m: FromWorker, transfer: Transferable[] = []) => ctx.postMessage(m, transfer);
@@ -143,6 +144,8 @@ function publish(force: boolean) {
   }
   const senses = e.take_senses();
   if (senses.length) post({ type: "senses", changes: decodeSenses(senses) });
+  const ir = e.take_ir();
+  if (ir.length) post({ type: "ir", signals: decodeIr(ir) });
   const log = e.take_log();
   if (log.length) {
     logTail = (logTail + logDecoder.decode(log, { stream: true })).slice(-4096);

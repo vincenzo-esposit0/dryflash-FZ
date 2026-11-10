@@ -36,6 +36,8 @@ pub const APB2RSTR: u32 = svd::RCC.offset_of("APB2RSTR");
 pub const APB2ENR: u32 = svd::RCC.offset_of("APB2ENR");
 /// TIM16 in APB2ENR and APB2RSTR (stm32wb55xx.h: RCC_APB2ENR_TIM16EN_Pos, RCC_APB2RSTR_TIM16RST_Pos, 17).
 pub const APB2_TIM16: u32 = 1 << 17;
+/// TIM1 in APB2ENR and APB2RSTR (stm32wb55xx.h: RCC_APB2ENR_TIM1EN_Pos, RCC_APB2RSTR_TIM1RST_Pos, 11).
+pub const APB2_TIM1: u32 = 1 << 11;
 
 /// (enable bit, ready bit) pairs in CR.
 const CR_READY: &[(u32, u32)] = &[(0, 1), (8, 10), (9, 12), (16, 17), (24, 25), (26, 27)];

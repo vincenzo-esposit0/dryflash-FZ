@@ -23,6 +23,7 @@ pub mod rtc;
 pub mod spi;
 #[rustfmt::skip]
 pub mod svd;
+pub mod tim1;
 pub mod tim16;
 pub mod usart;
 
@@ -90,6 +91,7 @@ enum Slot {
     Rng,
     Iwdg,
     Lptim(usize),
+    Tim1,
     Tim16,
     Generic(usize),
 }
@@ -115,6 +117,8 @@ pub struct Periphs {
     pub iwdg: iwdg::Iwdg,
     /// LPTIM1 (Furi's tickless idle timer), LPTIM2.
     pub lptim: Vec<lptim::Lptim>,
+    /// The IR transmitter's timer.
+    pub tim1: tim1::Tim1,
     /// The speaker's timer.
     pub tim16: tim16::Tim16,
     /// Register-file-only peripherals.
@@ -144,6 +148,8 @@ pub struct Periphs {
     pub buttons_down: Vec<crate::board::Button>,
     /// Speaker and vibration motor, with their changes over time.
     pub senses: crate::board::senses::Senses,
+    /// What the IR LED sent.
+    pub infrared: crate::board::infrared::Infrared,
 }
 
 impl Default for Periphs {
@@ -160,6 +166,7 @@ impl Periphs {
         let (mut spi, mut usart, mut dma) = ([None, None], [None, None], [None, None]);
         let mut lptim = Vec::new();
         let mut tim16 = None;
+        let mut tim1 = None;
         let mut map = Vec::new();
         for (i, d) in descs.iter().enumerate() {
             // A block extends to the next block or its last register, within the 1 KiB stride.
@@ -204,6 +211,10 @@ impl Periphs {
                     lptim.push(lptim::Lptim::new(d));
                     Slot::Lptim(lptim.len() - 1)
                 }
+                "TIM1" => {
+                    tim1 = Some(tim1::Tim1::new(d));
+                    Slot::Tim1
+                }
                 "TIM16" => {
                     tim16 = Some(tim16::Tim16::new(d));
                     Slot::Tim16
@@ -240,6 +251,7 @@ impl Periphs {
             rng: rng::Rng::new(rng::DEFAULT_SEED),
             iwdg: iwdg::Iwdg::new(),
             lptim,
+            tim1: tim1.expect("TIM1 in the SVD"),
             tim16: tim16.expect("TIM16 in the SVD"),
             generic,
             map,
@@ -257,6 +269,7 @@ impl Periphs {
             sd: None,
             buttons_down: Vec::new(),
             senses: Default::default(),
+            infrared: Default::default(),
         }
     }
 
@@ -493,6 +506,8 @@ impl Periphs {
         self.iwdg.reset();
         self.lptim.iter_mut().for_each(|l| l.reset());
         self.tim16.reset();
+        self.tim1.reset();
+        self.infrared.clear();
         if kind == ResetKind::PowerOn {
             // The RTC is in the backup domain: only power-on (or BDRST) resets it.
             self.rtc.reset(ns);
@@ -509,6 +524,7 @@ impl Periphs {
         self.spi.iter_mut().for_each(|s| s.reset());
         self.generic.iter_mut().for_each(|g| g.reset());
         self.clocks = self.rcc.clocks();
+        self.tim1.clock_hz = self.apb2_timer_clock(rcc::APB2_TIM1);
         self.update_irqs();
         self.update_senses(ns);
     }
@@ -523,6 +539,20 @@ impl Periphs {
         self.schedule();
     }
 
+    /// Runs TIM1's next update event if it is due by cycle `now`, and returns its time (ns). The
+    /// bus serves the DMA requests it makes, then calls [`Self::tim1_updated`].
+    pub fn tim1_step(&mut self, now: u64) -> Option<u128> {
+        let ns = self.now_ns(now);
+        self.tim1.step(ns)
+    }
+
+    /// After TIM1's update DMA at `ns`: the IR LED's new state, interrupts, the next event.
+    pub fn tim1_updated(&mut self, ns: u128) {
+        self.update_infrared(ns);
+        self.update_irqs();
+        self.schedule();
+    }
+
     /// CPU cycle at which virtual time reaches `ns` (rounded up).
     fn cycles_at(&self, ns: u128) -> u64 {
         let hz = self.clocks.hclk1.max(1) as u128;
@@ -532,7 +562,12 @@ impl Periphs {
 
     /// Recomputes the earliest peripheral event.
     fn schedule(&mut self) {
-        let ns = self.lptim.iter().filter_map(|l| l.next_event_ns()).min();
+        let ns = self
+            .lptim
+            .iter()
+            .filter_map(|l| l.next_event_ns())
+            .chain(self.tim1.next_event_ns())
+            .min();
         self.next_event = ns.map(|n| self.cycles_at(n));
     }
 
@@ -603,6 +638,7 @@ impl Periphs {
             Slot::Rng => &self.rng.regs,
             Slot::Iwdg => &self.iwdg.regs,
             Slot::Lptim(i) => &self.lptim[i].regs,
+            Slot::Tim1 => &self.tim1.regs,
             Slot::Tim16 => &self.tim16.regs,
             Slot::Generic(i) => &self.generic[i],
         }
@@ -654,6 +690,7 @@ impl Periphs {
                 self.update_irqs();
                 v
             }
+            Slot::Tim1 => self.tim1.read(word_off),
             Slot::Tim16 => self.tim16.read(word_off),
             // SPI DR reads pop frames from the FIFO: the access size matters.
             Slot::Spi(i) => return Some(self.spi[i].read(off, size).unwrap_or(0)),
@@ -715,6 +752,10 @@ impl Periphs {
                 if self.rcc.regs.get(rcc::APB2RSTR) & rcc::APB2_TIM16 != 0 {
                     self.tim16.reset();
                 }
+                if self.rcc.regs.get(rcc::APB2RSTR) & rcc::APB2_TIM1 != 0 {
+                    self.tim1.reset();
+                }
+                self.tim1.clock_hz = self.apb2_timer_clock(rcc::APB2_TIM1);
                 self.lptim_clocks();
                 self.update_irqs();
                 self.schedule();
@@ -782,6 +823,12 @@ impl Periphs {
                 }
                 h
             }
+            Slot::Tim1 => {
+                let ns = self.now_ns(ctx.now);
+                let h = self.tim1.write(word_off, value, ns);
+                self.schedule();
+                h
+            }
             Slot::Tim16 => self.tim16.write(word_off, value),
             Slot::Spi(_) => unreachable!(),
             Slot::Generic(i) => {
@@ -799,19 +846,38 @@ impl Periphs {
             let ns = self.now_ns(ctx.now);
             self.update_senses(ns);
         }
+        if matches!(slot, Slot::Tim1 | Slot::Rcc | Slot::Gpio(_)) {
+            let ns = self.now_ns(ctx.now);
+            self.update_infrared(ns);
+        }
         true
     }
 
-    /// TIM16's kernel clock: PCLK2, doubled when the APB2 prescaler divides (RM0434 RCC, timer
-    /// clocks; CFGR.PPRE2 bits 13:11, 0xx = not divided).
+    /// TIM16's kernel clock.
     fn tim16_clock(&self) -> u32 {
-        let enabled = self.rcc.regs.get(rcc::APB2ENR) & rcc::APB2_TIM16 != 0;
+        self.apb2_timer_clock(rcc::APB2_TIM16)
+    }
+
+    /// Kernel clock of the APB2 timer enabled by `bit` in APB2ENR: PCLK2, doubled when the APB2
+    /// prescaler divides (RM0434 RCC, timer clocks; CFGR.PPRE2 bits 13:11, 0xx = not divided).
+    fn apb2_timer_clock(&self, bit: u32) -> u32 {
+        let enabled = self.rcc.regs.get(rcc::APB2ENR) & bit != 0;
         let divided = (self.rcc.regs.get(rcc::CFGR) >> 11) & 4 != 0;
         match (enabled, divided) {
             (false, _) => 0,
             (true, false) => self.clocks.pclk2,
             (true, true) => self.clocks.pclk2.saturating_mul(2),
         }
+    }
+
+    /// The IR LED at virtual time `ns`: TIM1 channel 3N when PB9 is in alternate function 1.
+    fn update_infrared(&mut self, ns: u128) {
+        use crate::board::IR_TX;
+        let (port, pin) = IR_TX;
+        let g = &self.gpio[port].regs;
+        let af1 = (g.get(gpio::MODER) >> (2 * pin)) & 3 == 2 && (g.get(gpio::AFRH) >> (4 * (pin - 8))) & 0xF == 1;
+        let out = if af1 { self.tim1.ch3n() } else { tim1::Output::Off };
+        self.infrared.update(ns, out, self.tim1.running());
     }
 
     /// Speaker and vibration motor outputs at virtual time `ns`.
@@ -903,7 +969,7 @@ impl Periphs {
             (
                 "DMA1/DMA2 + DMAMUX",
                 Partial,
-                "SPI requests only, transfers instantaneous; other requests stay idle",
+                "SPI requests (instantaneous) and TIM1 update requests (one item each, half and complete flags); other requests stay idle",
             ),
             (
                 "FLASH controller",
@@ -917,6 +983,16 @@ impl Periphs {
                 "tone and duty cycle from the timer, played as a square wave; no counter, no timer interrupts",
             ),
             ("Vibration motor (PA8)", Emulated, "on/off from the pin"),
+            (
+                "TIM1",
+                Partial,
+                "update events from PSC, ARR and the repetition counter, update DMA requests, channel 3N output; CNT not readable, no capture/compare events, no interrupts",
+            ),
+            (
+                "IR transmitter (PB9, TIM1 channel 3N)",
+                Partial,
+                "carrier and mark/space timings of what the LED sends, shown as events; external module on PA7 not watched; IR receiver not emulated",
+            ),
             (
                 "Battery (BQ27220, BQ25896)",
                 Simulated,

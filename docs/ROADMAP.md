@@ -103,7 +103,8 @@ into `furi_hal_init_early`; tests green; digest shows the next gaps (BRINGUP_LOG
   `navigator.vibrate` on phones; both in the Events panel (checkpoint 1)
 - ☑ Battery/USB controls (checkpoint 2, ADR-0019): USB and charge in the toolbar; charging, ADC readings and power-off
   from the charger's registers; the firmware's charging LED; Power OFF turns the device off. The LED itself was done in M3
-- ☐ IR TX decoded to the event log (ARCHITECTURE §6 puts it in M7; it was missing here)
+- ☑ IR TX (checkpoint 3, ADR-0020): the firmware's TIM1 + DMA2 path runs; what the IR LED sends is shown in the Events panel
+  with carrier and timings, and can be saved as a raw `.ir` file
 - ☐ USB FS device + CDC → xterm.js CLI (stretch: protobuf RPC)
 
 **DoD:** CLI usable in the browser; audio/vibro/LED visible and controllable.

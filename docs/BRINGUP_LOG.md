@@ -912,3 +912,28 @@ page sets what a person controls, a USB cable and the charge, and the firmware s
 
 Demo: pick a firmware, tick **USB** in the Battery group (the LED turns red, the status bar shows the charging bolt), then go to Settings →
 Power → Power OFF → Power Off. Untick USB: the device is off. Tick it again, or press **Power on**.
+
+### Checkpoint 3 — IR transmit
+
+The firmware sends IR through TIM1 and two DMA2 channels: at each timer update, DMA writes the carrier mode (on or off) and how many
+carrier periods until the next update (ADR-0020). That path now runs as on the device, and the page shows what the IR LED sent.
+
+- **TIM1**: update events from PSC, ARR and the repetition counter on the virtual timeline, UG, UIF, the update DMA request and the
+  channel 3N output. **Partial**: CNT is not readable, there are no capture/compare events and no TIM1 interrupts.
+- **DMA**: TIM1 update requests move one item each, memory to peripheral. The half-transfer flag and its interrupt are new; the
+  firmware's double-buffer refill depends on it.
+- **IR LED (PB9)**: its edges become a transmission with the carrier, the duty cycle and mark/space timings in µs. The Events panel
+  shows "IR sent: 38.0 kHz carrier, duty 33 %, 67 timings, 68.0 ms", and **Save as .ir** downloads the signal as a raw entry of a
+  Flipper `.ir` file. No protocol names: the timings are what the LED sent.
+- **Checked on the official firmware** in `core/tests/infrared_official.rs`: `/ext/infrared/Test.ir` on a card with the package's
+  resources, Infrared → Saved Remotes → Test. The NEC button sends 38 kHz, duty 0.33, and its 67 timings decode to address 0x04 and
+  command 0x08 with the encoder's timings, each within one carrier period. The raw button sends its five timings at 40 kHz. E2E on
+  Chromium and WebKit: the same NEC file uploaded through Files, the button pressed from the keyboard, the event, and the saved
+  `.ir` file with its 67 timings. By hand in the browser: both buttons, each with the firmware's magenta blink while sending.
+- **Found on the way:** the firmware's Infrared app is a `.fap` on the card in 1.5.1, so it needs the package's resources. The remote
+  screen is a vertical view, so the firmware maps the physical Right key to Down there (`gui/view_port.c`, `view_port_input_mapping`).
+- **Not tested:** other firmwares; Universal Remotes (same path, more signals); signals longer than one 200-entry buffer (same
+  path, refilled from the half-transfer interrupt, not exercised by a test); Firefox (CI runs it).
+
+Demo: install a firmware package, open **Files** → `infrared`, upload a `.ir` file (or save one on the device). On the device, open
+Infrared → Saved Remotes → the file, press a button, and look at the Events panel under **Diagnostics**.

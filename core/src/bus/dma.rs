@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Runs DMA channels whose request source has a model: SPI1/SPI2 TX and RX, the only streams the
-//! SD driver uses (`furi_hal_spi_bus_trx_dma`, targets/f7/furi_hal/furi_hal_spi.c: DMA2 channels
-//! 6 and 7). Requests come through DMAMUX1 (`LL_DMAMUX_REQ_*`, stm32wbxx_ll_dmamux.h). Other
-//! requests stay idle with the channel enabled; each is reported once in the digest.
+//! Runs DMA channels whose request source has a model:
+//!
+//! - SPI1/SPI2 TX and RX, the only streams the SD driver uses (`furi_hal_spi_bus_trx_dma`,
+//!   targets/f7/furi_hal/furi_hal_spi.c: DMA2 channels 6 and 7), all at once;
+//! - TIM1's update request, one item per update event on every channel that listens to it (the IR
+//!   driver's DMA2 channels 1 and 2, furi_hal_infrared.c), memory to peripheral.
+//!
+//! Requests come through DMAMUX1 (`LL_DMAMUX_REQ_*`, stm32wbxx_ll_dmamux.h). Other requests stay
+//! idle with the channel enabled.
 
 use super::SystemBus;
 use crate::cpu::Size;
 use crate::periph::dma::{CCR_DIR, CCR_EN, CCR_MINC, CHANNELS};
-use crate::periph::svd;
+use crate::periph::{Ctx, svd};
 
 const DMAMUX_BASE: u32 = 0x4002_0800;
 const REQ_SPI1_RX: u32 = 6;
 const REQ_SPI1_TX: u32 = 7;
 const REQ_SPI2_RX: u32 = 8;
 const REQ_SPI2_TX: u32 = 9;
+const REQ_TIM1_UP: u32 = 0x19;
 const SPI_CR2: u32 = svd::SPI1.offset_of("CR2");
 const SPI_DR: u32 = svd::SPI1.offset_of("DR");
 const CR2_RXDMAEN: u32 = 1 << 0;
@@ -22,7 +28,11 @@ const CR2_TXDMAEN: u32 = 1 << 1;
 /// True if a write at `addr` can start a transfer.
 pub(super) fn concerns_dma(addr: u32) -> bool {
     let block = |base: u32| addr.wrapping_sub(base) < 0x400;
-    block(svd::DMA1.base) || block(svd::DMA2.base) || block(svd::SPI1.base) || block(svd::SPI2.base)
+    block(svd::DMA1.base)
+        || block(svd::DMA2.base)
+        || block(svd::SPI1.base)
+        || block(svd::SPI2.base)
+        || block(svd::TIM1.base)
 }
 
 impl SystemBus {
@@ -46,6 +56,11 @@ impl SystemBus {
     }
 
     pub(super) fn dma_service(&mut self) {
+        if self.periphs.tim1.dma_requests > 0 {
+            let ns = self.periphs.now_ns(self.now);
+            self.tim1_dma(ns);
+            self.periphs.tim1_updated(ns);
+        }
         for (spi, tx_req, rx_req) in [(0usize, REQ_SPI1_TX, REQ_SPI1_RX), (1, REQ_SPI2_TX, REQ_SPI2_RX)] {
             let cr2 = self.periphs.spi[spi].regs.get(SPI_CR2);
             if cr2 & CR2_TXDMAEN == 0 {
@@ -81,6 +96,70 @@ impl SystemBus {
                 self.periphs.dma[c].complete(n);
             }
             self.periphs.refresh_irqs();
+        }
+    }
+
+    /// Serves TIM1's pending update requests at `ns`: one item on each enabled channel requested by
+    /// TIM1_UP, from memory to the peripheral (RM0434 DMA: a source narrower than the destination is
+    /// zero-extended).
+    pub(super) fn tim1_dma(&mut self, ns: u128) {
+        let requests = std::mem::take(&mut self.periphs.tim1.dma_requests);
+        for _ in 0..requests {
+            for ctrl in 0..2 {
+                for ch in 0..CHANNELS {
+                    let d = &self.periphs.dma[ctrl];
+                    let ccr = d.ccr(ch);
+                    if ccr & CCR_EN == 0 || d.cndtr(ch) == 0 || self.dma_request(ctrl, ch) != REQ_TIM1_UP {
+                        continue;
+                    }
+                    if ccr & CCR_DIR == 0 {
+                        self.digest
+                            .event(self.now, "TIM1_UP DMA from a peripheral: not modelled".to_string());
+                        continue;
+                    }
+                    let msize = 1u32 << ((ccr >> 10) & 3);
+                    let psize = match (ccr >> 8) & 3 {
+                        0 => Size::Byte,
+                        1 => Size::Half,
+                        _ => Size::Word,
+                    };
+                    let step = if ccr & CCR_MINC != 0 { msize } else { 0 };
+                    let src = d.cmar(ch) + d.transferred(ch) * step;
+                    let dst = d.cpar(ch);
+                    let msz = match msize {
+                        1 => Size::Byte,
+                        2 => Size::Half,
+                        _ => Size::Word,
+                    };
+                    let v = self.read_mem(src, msz).unwrap_or_else(|| {
+                        let what = format!("DMA read outside memory at 0x{src:08X}");
+                        self.digest.event(self.now, what);
+                        0
+                    });
+                    self.dma_to_peripheral(dst, v, psize, ns);
+                    self.periphs.dma[ctrl].item_done(ch);
+                }
+            }
+        }
+        self.periphs.refresh_irqs();
+    }
+
+    /// A DMA write to a peripheral register. TIM1 gets the time of its update event, which may be
+    /// before the bus's current time.
+    fn dma_to_peripheral(&mut self, addr: u32, v: u32, size: Size, ns: u128) {
+        let off = addr.wrapping_sub(svd::TIM1.base);
+        if off < 0x400 && off & 3 == 0 {
+            self.periphs.tim1.write(off, v, ns);
+            return;
+        }
+        let mut ctx = Ctx {
+            now: self.now,
+            digest: &mut self.digest,
+            pc: self.access_pc,
+        };
+        if !self.periphs.write(addr, v, size, &mut ctx) {
+            let what = format!("DMA write outside peripherals at 0x{addr:08X}");
+            self.digest.event(self.now, what);
         }
     }
 
