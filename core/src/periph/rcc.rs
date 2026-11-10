@@ -30,6 +30,9 @@ const CSR: u32 = svd::RCC.offset_of("CSR");
 const CRRCR: u32 = svd::RCC.offset_of("CRRCR");
 const EXTCFGR: u32 = svd::RCC.offset_of("EXTCFGR");
 pub const CCIPR: u32 = svd::RCC.offset_of("CCIPR");
+pub const APB1ENR1: u32 = svd::RCC.offset_of("APB1ENR1");
+/// USB in APB1ENR1 and APB1RSTR1 (stm32wb55xx.h: RCC_APB1ENR1_USBEN_Pos, RCC_APB1RSTR1_USBRST_Pos, 26).
+pub const APB1_USB: u32 = 1 << 26;
 pub const APB1RSTR1: u32 = svd::RCC.offset_of("APB1RSTR1");
 pub const APB1RSTR2: u32 = svd::RCC.offset_of("APB1RSTR2");
 pub const APB2RSTR: u32 = svd::RCC.offset_of("APB2RSTR");

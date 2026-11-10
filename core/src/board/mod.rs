@@ -70,6 +70,7 @@ pub mod sdcard;
 pub mod senses;
 pub mod st25r3916;
 pub mod st7567;
+pub mod usb_host;
 
 /// Battery state shown by the fuel gauge and charger. The page sets the charge and whether USB is
 /// plugged in; whether it charges is the charger's to decide (`Periphs::sync_power`).

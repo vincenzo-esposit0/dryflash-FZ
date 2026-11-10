@@ -214,7 +214,7 @@ Initial fidelity targets:
 | IR RX/TX | Partial: TX through TIM1 + DMA2 turned back into carrier and timings, shown as events (ADR-0020, M7 checkpoint 3); RX not emulated → M8 | M7 |
 | Speaker (TIM16 PWM) | Partial (frequency/duty → WebAudio; done in M7 checkpoint 1) | M7 |
 | Vibro, GPIO header | Emulated (pin state; vibro done in M7 checkpoint 1) | M7 |
-| USB FS device (CDC) | Partial (enough for CLI) | M7 |
+| USB FS device (CDC) | Partial: the peripheral (control and bulk endpoints, double-buffered too) and a virtual host that enumerates the device and opens its CDC port for the page's terminal (ADR-0021, M7 checkpoint 4); no isochronous, LPM or charger detection | M7 |
 
 External SPI flash: none expected on f7 — verify in `furi_hal_resources.c`.
 

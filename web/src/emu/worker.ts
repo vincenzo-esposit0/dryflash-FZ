@@ -13,7 +13,7 @@ import {
   type DeviceBackend,
   type DeviceMeta,
 } from "./devices";
-import { BUTTONS, PROTOCOL_VERSION, type FromWorker, type ToWorker } from "./protocol";
+import { BUTTONS, PROTOCOL_VERSION, type FromWorker, type ToWorker, type UsbEvent } from "./protocol";
 import { Pacer, PressTimer, SLICE_BUDGET_MS, STEP_MS } from "./scheduler";
 import { decodeSenses } from "./senses";
 import { decodeIr } from "./infrared";
@@ -146,6 +146,13 @@ function publish(force: boolean) {
   if (senses.length) post({ type: "senses", changes: decodeSenses(senses) });
   const ir = e.take_ir();
   if (ir.length) post({ type: "ir", signals: decodeIr(ir) });
+  const usb: UsbEvent[] = JSON.parse(e.take_usb_events());
+  if (usb.length) post({ type: "usb", events: usb });
+  const serial = e.take_usb_serial();
+  if (serial.length) {
+    const bytes = serial.slice().buffer;
+    post({ type: "serial", bytes }, [bytes]);
+  }
   const log = e.take_log();
   if (log.length) {
     logTail = (logTail + logDecoder.decode(log, { stream: true })).slice(-4096);
@@ -434,6 +441,12 @@ function handle(m: ToWorker) {
         }
         break;
       }
+      case "serialOpen":
+        emu.usb_serial_open(m.open);
+        break;
+      case "serialInput":
+        emu.usb_serial_send(new Uint8Array(m.bytes));
+        break;
       case "control":
         if (!loaded) break;
         if (m.action === "reset") powerOn();

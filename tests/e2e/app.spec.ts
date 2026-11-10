@@ -11,7 +11,8 @@ const TGZ = resolve(__dirname, "../../firmware/cache/official/flipper-z-f7-updat
  * Every test fails on an uncaught error, a console error or a CSP violation. One exception: WebKit reports
  * `style-src-attr` for its own internals of a `<select>`, with no effect on rendering, and the event does not
  * always say which element. So WebKit is forgiven that directive alone: inline styles of ours would fail on
- * Chromium and Firefox, which stay strict. The CSP is not relaxed.
+ * Chromium and Firefox, which stay strict. The main page allows inline styles for xterm.js (ADR-0021); `/embed`
+ * does not, and scripts are 'self' only everywhere.
  */
 const test = base.extend<{ errorWatch: void }>({
   errorWatch: [
@@ -285,6 +286,30 @@ test.describe("with a firmware", () => {
     await expect.poll(() => darkPixels(page), { timeout: 30_000 }).toBeGreaterThan(300);
   });
 
+  test("the firmware's CLI answers in the terminal over the virtual USB cable", async ({ page }) => {
+    await install(page);
+    await bootToPopup(page);
+    await page.getByRole("tab", { name: "CLI" }).click();
+    const status = page.locator(".cli-status");
+    await expect(status).toContainText("USB is not plugged in");
+    await page.getByRole("group", { name: "Battery" }).getByRole("checkbox", { name: "USB" }).check();
+    // The computer enumerates the device: product and serial come from the firmware (furi_hal_usb_cdc.c).
+    await expect(status).toContainText(/Connected: .+ \(flip_.+\)/, { timeout: 15_000 });
+
+    await page.getByRole("button", { name: "Open the port" }).click();
+    const terminal = page.locator(".terminal-box");
+    await expect(terminal).toContainText("Welcome to Flipper Zero Command Line Interface!", { timeout: 15_000 });
+    await page.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.type("info power");
+    await page.keyboard.press("Enter");
+    await expect(terminal).toContainText("charge.state", { timeout: 15_000 });
+    await expect(terminal).toContainText("charging");
+
+    await page.getByRole("button", { name: "Close the port" }).click();
+    await page.getByRole("tab", { name: "Diagnostics" }).click();
+    await expect(page.locator(".events")).toContainText("USB: connected to the computer as");
+  });
+
   test("a saved remote's button shows what the IR LED sent, ready to save as .ir", async ({ page }) => {
     await install(page);
     await bootToPopup(page);
@@ -463,8 +488,8 @@ test.describe("accessibility", () => {
     await page.goto("/");
     await page.getByRole("tab", { name: "Device" }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(page.getByRole("tab", { name: "Update" })).toBeFocused();
-    await expect(page.getByRole("tab", { name: "Update" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "CLI" })).toBeFocused();
+    await expect(page.getByRole("tab", { name: "CLI" })).toHaveAttribute("aria-selected", "true");
   });
 
   test("the page's language follows the text", async ({ page }) => {

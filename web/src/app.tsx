@@ -25,6 +25,7 @@ import { Picker } from "./ui/picker";
 import { ART_STEP, artSize, drawView, fitView, fitWorkspace, type Skin, skinForColour, toRgba, type View } from "./ui/shell";
 import { LCD_H, LCD_W, ghostStep, glass, inkColour, paint, paintInk } from "./ui/lcd";
 import { Speaker } from "./ui/sound";
+import { CliPanel, noteSerial, writeSerial, type UsbConnection } from "./ui/terminal";
 
 const LOG_LIMIT = 64 * 1024;
 const EVENT_LIMIT = 200;
@@ -489,9 +490,10 @@ function Devices({
   );
 }
 
-type Tab = "device" | "update" | "files" | "backup" | "diagnostics";
+type Tab = "device" | "cli" | "update" | "files" | "backup" | "diagnostics";
 const TABS: [Tab, Key][] = [
   ["device", "tabDevice"],
+  ["cli", "tabCli"],
   ["update", "tabUpdate"],
   ["files", "tabFiles"],
   ["backup", "tabBackup"],
@@ -684,6 +686,9 @@ export function App({ embed = false }: { embed?: boolean }) {
   const [leds, setLeds] = useState<[number, number, number, number]>([0, 0, 0, 0]);
   const [log, setLog] = useState("");
   const [events, setEvents] = useState<EventItem[]>([]);
+  /** What the computer on the USB cable last saw, and whether the terminal has the port open. */
+  const [usbConn, setUsbConn] = useState<UsbConnection>({ state: "waiting" });
+  const [serialOpen, setSerialOpen] = useState(false);
   /** Events in the order they happened; the list shows the newest first. */
   const addEvents = (...items: (string | EventItem)[]) => {
     const time = new Date().toLocaleTimeString();
@@ -904,6 +909,23 @@ export function App({ embed = false }: { embed?: boolean }) {
           break;
         case "ir":
           addEvents(...m.signals.map(irEvent));
+          break;
+        case "serial":
+          writeSerial(new Uint8Array(m.bytes));
+          break;
+        case "usb":
+          for (const u of m.events) {
+            if (u.event === "configured") {
+              setUsbConn({ state: "connected", product: u.product, serial: u.serial });
+              addEvents(tr("usbConnectedEvent").replace("{product}", u.product).replace("{serial}", u.serial));
+            } else if (u.event === "disconnected") {
+              setUsbConn({ state: "waiting" });
+              addEvents(tr("usbDisconnectedEvent"));
+            } else {
+              setUsbConn({ state: "failed", detail: u.detail });
+              addEvents(tr("cliFailed").replace("{detail}", u.detail));
+            }
+          }
           break;
         case "log": {
           const text = stripAnsi(decoder.decode(new Uint8Array(m.bytes), { stream: true }));
@@ -1427,6 +1449,19 @@ export function App({ embed = false }: { embed?: boolean }) {
                   </section>
                   <Devices devices={devices} active={active} firmware={firmware} send={send} ask={setQuestion} />
                 </>
+              )}
+
+              {tab === "cli" && (
+                <CliPanel
+                  usb={active?.battery.usb ? usbConn : { state: "unplugged" }}
+                  open={serialOpen}
+                  setOpen={(open) => {
+                    setSerialOpen(open);
+                    send({ type: "serialOpen", open });
+                    noteSerial(tr(open ? "cliPortOpened" : "cliPortClosed"));
+                  }}
+                  send={(bytes) => send({ type: "serialInput", bytes }, [bytes])}
+                />
               )}
 
               {tab === "update" && (
