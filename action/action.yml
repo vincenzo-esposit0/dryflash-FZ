@@ -33,7 +33,7 @@ inputs:
   package:
     description: Which runner to use, as npx understands it. By default the matching GitHub Release
     required: false
-    default: https://github.com/vincenzo-esposit0/dryflash-FZ/releases/download/v0.1.0/dryflash-0.1.0.tgz
+    default: https://github.com/vincenzo-esposit0/dryflash-FZ/releases/download/v1.0.0/dryflash-1.0.0.tgz
 outputs:
   result:
     description: pass, fail or emulator-limitation
