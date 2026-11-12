@@ -1,7 +1,7 @@
 {
   "$comment": "SPDX-License-Identifier: GPL-3.0-or-later. Written by scripts/compat-matrix.mjs in the nightly CI, never by hand. true = seen working, false = seen failing, null = could not run. `checked` is the last run that wrote this file.",
-  "checked": "2026-11-09",
-  "commit": "91e524b",
+  "checked": "2026-11-12",
+  "commit": "e5f6e84",
   "results": {
     "official": {
       "boots": true,
@@ -40,5 +40,17 @@
       "verdict": null
     }
   },
-  "latest": {}
+  "latest": {
+    "unleashed": {
+      "version": "unlshd-095",
+      "url": "https://github.com/DarkFlippers/unleashed-firmware/releases/download/unlshd-095/flipper-z-f7-update-unlshd-095.tgz",
+      "boots": true,
+      "desktop": true,
+      "apps": true,
+      "entries": 12,
+      "ota": true,
+      "problem": null,
+      "verdict": null
+    }
+  }
 }
